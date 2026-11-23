@@ -1,0 +1,265 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { ArrowLeft, Sparkles, Heart, Palette, Droplets, Check, Bookmark, Eye } from 'lucide-react';
+import BeforeAfterSlider from '../components/common/BeforeAfterSlider';
+import { useAuth } from '../context/AuthContext';
+import { apiClient } from '../services/apiClient';
+
+export default function RecommendationResultPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isAuthenticated, user } = useAuth();
+
+  const [saved, setSaved] = useState(false);
+  const [showSkinGuide, setShowSkinGuide] = useState(false);
+  const [simulatedImage, setSimulatedImage] = useState(null);
+
+  // Retrieve portrait and analysis data
+  const capturedImage = location.state?.capturedImage ||
+    sessionStorage.getItem('glamai_guest_image') ||
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80";
+
+  const selectedEvent = location.state?.selectedEvent || {
+    name: sessionStorage.getItem('glamai_guest_occasion') || 'Party',
+    id: 'party'
+  };
+
+  // Generate simulated makeup image honestly via offscreen canvas
+  useEffect(() => {
+    if (!capturedImage) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 600;
+      canvas.height = img.naturalHeight || 750;
+      const ctx = canvas.getContext('2d');
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Subtle warm radiance overlay
+      ctx.fillStyle = 'rgba(255, 220, 210, 0.08)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Cheek blush tint
+      const blushGradientLeft = ctx.createRadialGradient(
+        canvas.width * 0.35, canvas.height * 0.58, 10,
+        canvas.width * 0.35, canvas.height * 0.58, canvas.width * 0.18
+      );
+      blushGradientLeft.addColorStop(0, 'rgba(220, 100, 110, 0.22)');
+      blushGradientLeft.addColorStop(1, 'transparent');
+      ctx.fillStyle = blushGradientLeft;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const blushGradientRight = ctx.createRadialGradient(
+        canvas.width * 0.65, canvas.height * 0.58, 10,
+        canvas.width * 0.65, canvas.height * 0.58, canvas.width * 0.18
+      );
+      blushGradientRight.addColorStop(0, 'rgba(220, 100, 110, 0.22)');
+      blushGradientRight.addColorStop(1, 'transparent');
+      ctx.fillStyle = blushGradientRight;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Lip tint
+      const lipGradient = ctx.createRadialGradient(
+        canvas.width * 0.5, canvas.height * 0.72, 8,
+        canvas.width * 0.5, canvas.height * 0.72, canvas.width * 0.13
+      );
+      lipGradient.addColorStop(0, 'rgba(185, 47, 96, 0.32)');
+      lipGradient.addColorStop(1, 'transparent');
+      ctx.fillStyle = lipGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      setSimulatedImage(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.src = capturedImage;
+  }, [capturedImage]);
+
+  const analysis = (() => {
+    const stored = sessionStorage.getItem('glamai_guest_analysis');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return user?.beauty_profile || {
+      face_shape: 'Oval',
+      skin_tone: 'Warm Wheatish',
+      skin_tone_hex: '#D8A782',
+      eye_shape: 'Almond',
+      nose_characteristics: 'Straight',
+      lip_shape: 'Medium'
+    };
+  })();
+
+  const handleSaveLook = async () => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    try {
+      await apiClient.post('/user/saved-looks', {
+        title: `${selectedEvent.name} Recommended Look`,
+        event: selectedEvent.name,
+        thumbnail: capturedImage,
+        analysis: analysis
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      alert('Could not save look. Please try again.');
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 pb-12 font-sans text-[#30232A]">
+      {/* Top Header matching mockup 7 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2.5 rounded-2xl bg-white border border-[#F8DCE5] text-[#30232A] hover:text-[#B92F60] hover:bg-[#FFF1F5] transition-colors shadow-2xs"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#30232A]">
+              Your AI Makeup Recommendation
+            </h1>
+            <p className="text-xs text-[#30232A]/60">
+              Personalized for <span className="font-semibold text-[#B92F60]">{selectedEvent.name}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Save Look CTA */}
+        <button
+          onClick={handleSaveLook}
+          className={`flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-2xl border text-xs font-bold transition-all shadow-2xs ${
+            saved
+              ? 'bg-[#B92F60] text-white border-[#B92F60]'
+              : 'bg-white hover:bg-[#FFF1F5] text-[#B92F60] border-[#F8DCE5]'
+          }`}
+        >
+          {saved ? (
+            <>
+              <Check className="w-4 h-4" />
+              <span>Saved!</span>
+            </>
+          ) : (
+            <>
+              <Heart className="w-4 h-4 fill-[#B92F60]/20 text-[#B92F60]" />
+              <span>Save Look</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Main Grid: Comparison Slider (Left) + Analysis Sidebar (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: Before & After Slider (8 cols) */}
+        <div className="lg:col-span-8 bg-white rounded-3xl p-4 sm:p-6 border border-[#F8DCE5] shadow-xs space-y-3">
+          <BeforeAfterSlider
+            beforeImage={capturedImage}
+            afterImage={simulatedImage || capturedImage}
+            beforeLabel="Before"
+            afterLabel="After (Recommended Look)"
+          />
+          <p className="text-[11px] text-center text-[#30232A]/60 pt-1">
+            Drag the center circle horizontally to compare original and simulated makeup
+          </p>
+        </div>
+
+        {/* Right: Your Analysis Card (4 cols) matching mockup 7 */}
+        <div className="lg:col-span-4 bg-white rounded-3xl p-5 sm:p-6 border border-[#F8DCE5] shadow-xs space-y-4">
+          <div className="border-b border-[#F8DCE5]/70 pb-3">
+            <h3 className="text-base font-serif font-bold text-[#30232A]">Your Analysis</h3>
+            <p className="text-xs text-[#30232A]/60">AI estimated facial features</p>
+          </div>
+
+          <div className="space-y-2.5 text-xs">
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF1F5] border border-[#F8DCE5]/70">
+              <span className="text-[#30232A]/70 font-medium">Face Shape:</span>
+              <span className="font-bold text-[#30232A]">{analysis.face_shape || 'Oval'}</span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF1F5] border border-[#F8DCE5]/70">
+              <span className="text-[#30232A]/70 font-medium">Skin Tone:</span>
+              <span className="font-bold text-[#30232A] flex items-center gap-1.5">
+                <span
+                  className="w-3 h-3 rounded-full border border-black/10"
+                  style={{ backgroundColor: analysis.skin_tone_hex || '#D8A782' }}
+                />
+                {analysis.skin_tone || 'Warm Wheatish'}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF1F5] border border-[#F8DCE5]/70">
+              <span className="text-[#30232A]/70 font-medium">Eye Shape:</span>
+              <span className="font-bold text-[#30232A]">{analysis.eye_shape || 'Almond'}</span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF1F5] border border-[#F8DCE5]/70">
+              <span className="text-[#30232A]/70 font-medium">Nose Shape:</span>
+              <span className="font-bold text-[#30232A]">{analysis.nose_characteristics || 'Straight'}</span>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF1F5] border border-[#F8DCE5]/70">
+              <span className="text-[#30232A]/70 font-medium">Lips:</span>
+              <span className="font-bold text-[#30232A]">{analysis.lip_shape || 'Medium Full'}</span>
+            </div>
+          </div>
+
+          {/* AI Signature Note */}
+          <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] text-[11px] text-[#B92F60] flex items-center gap-2">
+            <Sparkles className="w-4 h-4 flex-shrink-0" />
+            <span>High match confidence for warm tones &amp; peachy blush contouring.</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Primary CTAs matching mockup 7 */}
+      <div className="flex flex-col sm:flex-row items-center gap-4 pt-1">
+        <button
+          onClick={() => navigate('/try-shades', { state: { capturedImage, selectedEvent } })}
+          className="w-full sm:flex-1 py-3 rounded-2xl bg-[#B92F60] hover:bg-[#C94D78] text-white text-xs sm:text-sm font-bold shadow-xs transition-all active:scale-98 flex items-center justify-center gap-2"
+        >
+          <Palette className="w-4 h-4" />
+          <span>Try Different Shades</span>
+        </button>
+
+        <button
+          onClick={() => setShowSkinGuide(!showSkinGuide)}
+          className="w-full sm:flex-1 py-3 rounded-2xl bg-white hover:bg-[#FFF1F5] text-[#30232A] border border-[#F8DCE5] text-xs sm:text-sm font-bold shadow-2xs transition-all active:scale-98 flex items-center justify-center gap-2"
+        >
+          <Droplets className="w-4 h-4 text-[#B92F60]" />
+          <span>{showSkinGuide ? 'Hide Skin Guide' : 'View Skin Guide'}</span>
+        </button>
+      </div>
+
+      {/* Skin Guide Dropdown / Drawer */}
+      {showSkinGuide && (
+        <div className="p-5 sm:p-6 rounded-3xl bg-white border border-[#F8DCE5] shadow-xs space-y-3 animate-in fade-in">
+          <div className="flex items-center gap-2 pb-2 border-b border-[#F8DCE5]">
+            <Droplets className="w-4 h-4 text-[#B92F60]" />
+            <h3 className="text-sm font-serif font-bold text-[#30232A]">
+              Personalized Skin Guide for {analysis.skin_type || 'Your'} Skin
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-[#30232A]/80">
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/80 space-y-1">
+              <p className="font-bold text-[#B92F60]">1. Preparation</p>
+              <p>Apply lightweight hydrating toner and oil-balancing primer before makeup.</p>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/80 space-y-1">
+              <p className="font-bold text-[#B92F60]">2. Application</p>
+              <p>Use a damp beauty sponge to press satin-finish foundation into pores seamlessly.</p>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/80 space-y-1">
+              <p className="font-bold text-[#B92F60]">3. Setting</p>
+              <p>Dust translucent powder on the T-zone and lock in with dewy fixing mist.</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

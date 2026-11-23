@@ -1,0 +1,320 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  Sparkles, ArrowLeft, Sun, Moon, Check, Droplets, Palette, CircleDot,
+  Heart, PartyPopper, Coffee, Briefcase
+} from 'lucide-react';
+import { apiClient } from '../services/apiClient';
+import SkinTypeConfirmation from '../components/SkinTypeConfirmation';
+import { useAuth } from '../context/AuthContext';
+
+const EVENTS = [
+  { id: 'Wedding', label: 'Wedding', tagline: 'Glamorous and Elegant', icon: Heart },
+  { id: 'Party', label: 'Party', tagline: 'Trendy and Stylish', icon: PartyPopper },
+  { id: 'Casual / Daily Wear', label: 'Casual / Daily Wear', tagline: 'Natural and Fresh', icon: Coffee },
+  { id: 'Office', label: 'Office', tagline: 'Subtle and Professional', icon: Briefcase },
+];
+
+const TIME_OPTIONS = [
+  { id: 'Day', label: 'Day Makeup', icon: Sun, desc: 'Luminous, natural lighting finish' },
+  { id: 'Night', label: 'Night Makeup', icon: Moon, desc: 'Defined, bold evening elegance' },
+];
+
+export default function GuestResultsPage() {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+  const [analysis, setAnalysis] = useState(null);
+  const [confirmedSkinType, setConfirmedSkinType] = useState('');
+  const [imageData, setImageData] = useState(null);
+
+  const [selectedEvent, setSelectedEvent] = useState('Party');
+  const [selectedTime, setSelectedTime] = useState('Day');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem('glamai_guest_analysis');
+    const img = sessionStorage.getItem('glamai_guest_image');
+    if (!stored) {
+      navigate('/guest/upload');
+      return;
+    }
+    setAnalysis(JSON.parse(stored));
+    setImageData(img);
+  }, [navigate]);
+
+  if (!analysis) return null;
+
+  const handleGenerateLook = async () => {
+    if (!confirmedSkinType || isGenerating) return;
+    const confirmedAnalysis = {
+      ...analysis,
+      skin_type: confirmedSkinType,
+      skin_type_user_confirmed: true
+    };
+    sessionStorage.setItem(
+      'glamai_guest_analysis',
+      JSON.stringify(confirmedAnalysis)
+    );
+    setAnalysis(confirmedAnalysis);
+    setIsGenerating(true);
+    try {
+      // Save choices in sessionStorage
+      sessionStorage.setItem('glamai_guest_occasion', selectedEvent);
+      sessionStorage.setItem('glamai_guest_time', selectedTime);
+
+      // Call backend recommendations API
+      try {
+        const response = await apiClient.post('/recommendations/generate', {
+          analysis: confirmedAnalysis,
+          occasion: selectedEvent,
+          time_of_day: selectedTime
+        });
+        if (response.data && response.data.recommendation) {
+          sessionStorage.setItem('glamai_guest_palette', JSON.stringify(response.data.recommendation));
+        }
+      } catch (apiErr) {
+        console.warn('Backend recommendation error, relying on local generator:', apiErr);
+      }
+
+      const isAuth = isAuthenticated || !!localStorage.getItem('glamai_token');
+      if (isAuth) {
+        navigate('/result');
+      } else {
+        navigate('/guest/tryon');
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const skinToneVal = analysis.skin_tone || 'Not available';
+  const undertoneVal = analysis.undertone || 'Not available';
+  const skinTypeVal = analysis.skin_type || 'Not available';
+  const faceShapeVal = analysis.face_shape || 'Not available';
+
+  return (
+    <div className="min-h-screen bg-[#FFF1F5] flex flex-col font-sans text-[#30232A]">
+      {/* Header */}
+      <header className="px-6 py-4 flex items-center justify-between border-b border-[#F8DCE5] bg-white/70 backdrop-blur-sm sticky top-0 z-20">
+        <Link to="/" className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#B92F60] to-[#C94D78] flex items-center justify-center text-white shadow-xs">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <span className="text-base font-bold text-[#30232A] tracking-tight">AI GLAM</span>
+        </Link>
+        <button
+          onClick={() => navigate('/guest/upload')}
+          className="text-xs font-semibold text-[#30232A]/70 hover:text-[#B92F60] flex items-center gap-1 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          New Photo
+        </button>
+      </header>
+
+      {/* Main Single Continuous Workflow Container */}
+      <main className="flex-1 flex justify-center px-4 py-8">
+        <div className="w-full max-w-3xl space-y-6">
+
+          {/* SECTION A: Beauty Profile (Compact Summary) */}
+          <section className="bg-white rounded-3xl border border-[#F8DCE5] p-5 sm:p-6 shadow-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F8DCE5]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-[#B92F60]/10 flex items-center justify-center text-[#B92F60]">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-serif font-bold text-[#30232A] leading-tight">
+                    Your Beauty Profile
+                  </h2>
+                  <p className="text-[11px] text-[#30232A]/60">Detected from your uploaded portrait</p>
+                </div>
+              </div>
+
+              {/* Small Face Thumbnail */}
+              {imageData && (
+                <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-[#F8DCE5] shadow-2xs flex-shrink-0">
+                  <img src={imageData} alt="Your portrait" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+
+            {/* Compact 4-Metric Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4">
+              {/* Skin Tone */}
+              <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/70 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs text-[#30232A]/60">
+                  <span>Skin Tone</span>
+                  <Palette className="w-3.5 h-3.5 text-[#B92F60]" />
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  {analysis.skin_tone_hex && (
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-black/10 flex-shrink-0"
+                      style={{ backgroundColor: analysis.skin_tone_hex }}
+                    />
+                  )}
+                  <span className="text-xs font-bold text-[#30232A] truncate">{skinToneVal}</span>
+                </div>
+              </div>
+
+              {/* Undertone */}
+              <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/70 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs text-[#30232A]/60">
+                  <span>Undertone</span>
+                  <Sun className="w-3.5 h-3.5 text-[#B92F60]" />
+                </div>
+                <div className="mt-1">
+                  <span className="text-xs font-bold text-[#30232A]">{undertoneVal}</span>
+                </div>
+              </div>
+
+              {/* Skin Type */}
+              <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/70 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs text-[#30232A]/60">
+                  <span>Skin Type</span>
+                  <Droplets className="w-3.5 h-3.5 text-[#B92F60]" />
+                </div>
+                <div className="mt-1">
+                  <span className="text-xs font-bold text-[#30232A]">{skinTypeVal}</span>
+                </div>
+              </div>
+
+              {/* Face Shape */}
+              <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5]/70 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs text-[#30232A]/60">
+                  <span>Face Shape</span>
+                  <CircleDot className="w-3.5 h-3.5 text-[#B92F60]" />
+                </div>
+                <div className="mt-1">
+                  <span className="text-xs font-bold text-[#30232A]">{faceShapeVal}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <SkinTypeConfirmation
+            predictedSkinType={analysis.skin_type}
+            selectedSkinType={confirmedSkinType}
+            onChange={setConfirmedSkinType}
+          />
+
+          {/* SECTION B: Select Your Event */}
+          <section className="bg-white rounded-3xl border border-[#F8DCE5] p-5 sm:p-6 shadow-xs">
+            <div className="mb-4">
+              <h2 className="text-base sm:text-lg font-serif font-bold text-[#30232A]">
+                Select Your Event
+              </h2>
+              <p className="text-xs text-[#30232A]/60 mt-0.5">
+                Choose an occasion to tailor the aesthetic intensity and color harmony
+              </p>
+            </div>
+
+            {/* 4 Compact Event Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {EVENTS.map((event) => {
+                const Icon = event.icon;
+                const isSelected = selectedEvent === event.id;
+                return (
+                  <button
+                    key={event.id}
+                    type="button"
+                    onClick={() => setSelectedEvent(event.id)}
+                    className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left transition-all ${
+                      isSelected
+                        ? 'bg-[#F8DCE5] border-[#B92F60] shadow-xs ring-1 ring-[#B92F60]'
+                        : 'bg-white border-[#F8DCE5] hover:border-[#B92F60]/40'
+                    }`}
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                        isSelected ? 'bg-[#B92F60] text-white' : 'bg-[#FFF1F5] text-[#B92F60]'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-bold ${isSelected ? 'text-[#B92F60]' : 'text-[#30232A]'}`}>
+                        {event.label}
+                      </p>
+                      <p className="text-[11px] text-[#30232A]/60 truncate mt-0.5">{event.tagline}</p>
+                    </div>
+                    {isSelected && (
+                      <div className="w-5 h-5 rounded-full bg-[#B92F60] flex items-center justify-center flex-shrink-0 text-white">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* SECTION C: Select Makeup Time */}
+          <section className="bg-white rounded-3xl border border-[#F8DCE5] p-5 sm:p-6 shadow-xs">
+            <div className="mb-4">
+              <h2 className="text-base sm:text-lg font-serif font-bold text-[#30232A]">
+                Select Makeup Time
+              </h2>
+              <p className="text-xs text-[#30232A]/60 mt-0.5">
+                Lighting conditions affect foundation undertone radiance and contrast
+              </p>
+            </div>
+
+            {/* 2 Compact Time Options */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {TIME_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const isSelected = selectedTime === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setSelectedTime(opt.id)}
+                    className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left transition-all ${
+                      isSelected
+                        ? 'bg-[#F8DCE5] border-[#B92F60] shadow-xs ring-1 ring-[#B92F60]'
+                        : 'bg-white border-[#F8DCE5] hover:border-[#B92F60]/40'
+                    }`}
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                        isSelected ? 'bg-[#B92F60] text-white' : 'bg-[#FFF1F5] text-[#B92F60]'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-bold ${isSelected ? 'text-[#B92F60]' : 'text-[#30232A]'}`}>
+                        {opt.label}
+                      </p>
+                      <p className="text-[11px] text-[#30232A]/60 mt-0.5">{opt.desc}</p>
+                    </div>
+                    {isSelected && (
+                      <div className="w-5 h-5 rounded-full bg-[#B92F60] flex items-center justify-center flex-shrink-0 text-white">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Primary Action Button */}
+          <div className="pt-2 text-center">
+            <button
+              onClick={handleGenerateLook}
+                disabled={isGenerating || !confirmedSkinType}
+              disabled={isGenerating}
+              className="w-full sm:w-auto px-8 py-3 text-xs sm:text-sm font-bold text-white bg-[#B92F60] hover:bg-[#C94D78] rounded-2xl shadow-xs transition-all active:scale-95 inline-flex items-center justify-center gap-2"
+            >
+              <span>Generate My Makeup Look</span>
+              <Sparkles className="w-4 h-4" />
+            </button>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  );
+}

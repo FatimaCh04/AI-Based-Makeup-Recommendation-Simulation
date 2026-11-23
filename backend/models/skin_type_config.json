@@ -1,0 +1,26 @@
+{
+    "model_name": "EfficientNetB0",
+    "model_file": "skin_type_efficientnetb0_repaired_best.keras",
+    "input_size": [
+        224,
+        224
+    ],
+    "input_channels": 3,
+    "input_dtype": "float32",
+    "pixel_range": [
+        0,
+        255
+    ],
+    "external_normalization": false,
+    "class_names": [
+        "dry",
+        "normal",
+        "oily"
+    ],
+    "requires_user_confirmation": true,
+    "validation_accuracy_original_groups": 0.51,
+    "validation_group_count": 100,
+    "intended_use": "Experimental makeup recommendation",
+    "medical_diagnosis": false,
+    "model_sha256": "b2ee1fb40523855228b38ff848803e35b9d04dd3cc77fe9b96e5f9c976df2350"
+}

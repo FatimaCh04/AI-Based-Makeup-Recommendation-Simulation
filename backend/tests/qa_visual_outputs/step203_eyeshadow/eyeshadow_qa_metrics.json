@@ -1,0 +1,32 @@
+{
+  "hero_model": {
+    "image": "frontend/public/hero-model.png",
+    "dimensions": "676x548",
+    "left_eye": {
+      "width_px": 36.9,
+      "lid_height_px": 8.58
+    },
+    "right_eye": {
+      "width_px": 45.26,
+      "lid_height_px": 9.18
+    },
+    "eyeshadow_mask_pixels": 601,
+    "eyeball_overlap_pixels": 0,
+    "eyeball_protection_verified": true
+  },
+  "login_model": {
+    "image": "frontend/src/assets/login-model-merged.png",
+    "dimensions": "709x546",
+    "left_eye": {
+      "width_px": 39.3,
+      "lid_height_px": 10.11
+    },
+    "right_eye": {
+      "width_px": 46.84,
+      "lid_height_px": 10.31
+    },
+    "eyeshadow_mask_pixels": 685,
+    "eyeball_overlap_pixels": 0,
+    "eyeball_protection_verified": true
+  }
+}

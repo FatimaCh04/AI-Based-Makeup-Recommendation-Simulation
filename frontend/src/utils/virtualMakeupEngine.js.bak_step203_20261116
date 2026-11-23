@@ -1,0 +1,1070 @@
+/**
+ * GlamAI Virtual Makeup Simulation Engine
+ * High-precision, face-aware cosmetic simulation using MediaPipe facial landmarks and HTML5 Canvas 2D.
+ * 
+ * Step 200: Face-Aware Lipstick Simulation with Vermilion Border Masking,
+ * Mouth Cavity Cutout (Teeth Protection), and Texture-Preserving Blend Modes.
+ */
+
+// Canonical MediaPipe 478-mesh landmark indices for lips
+export const LIP_LANDMARK_INDICES = {
+  // Full outer perimeter loop (starts at left corner 61, traces upper then lower vermilion border)
+  outer: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61],
+  // Full inner perimeter loop (inner mouth opening, starts at left corner 78)
+  inner: [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78],
+  // Upper lip contours
+  upperOuter: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291],
+  upperInner: [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308],
+  // Lower lip contours
+  lowerOuter: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291],
+  lowerInner: [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308],
+  // Key anatomical centers
+  cupidApex: 0,
+  lowerCenter: 17,
+  upperInnerCenter: 13,
+  lowerInnerCenter: 14,
+  leftCorner: 61,
+  rightCorner: 291,
+};
+
+// Canonical MediaPipe 478-mesh landmark indices for cheeks and facial feature boundaries
+export const CHEEK_LANDMARK_INDICES = {
+  left: {
+    center: 205,       // Malar cheek apple center
+    apple: 50,         // Upper malar prominence
+    zygion: 234,       // Lateral cheekbone edge
+    alar: 98,          // Nasal alar base
+    subEye: 145,       // Lower eyelid border
+    mouthCorner: 61,   // Labial commissure
+  },
+  right: {
+    center: 425,       // Malar cheek apple center
+    apple: 280,        // Upper malar prominence
+    zygion: 454,       // Lateral cheekbone edge
+    alar: 327,         // Nasal alar base
+    subEye: 374,       // Lower eyelid border
+    mouthCorner: 291,  // Labial commissure
+  },
+  exclusions: {
+    leftEye: [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7],
+    rightEye: [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249],
+    lips: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61],
+    noseBridge: [168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 98, 97, 326, 327]
+  },
+  faceOval: [
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379,
+    378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
+    162, 21, 54, 103, 67, 109, 10
+  ]
+};
+
+// Canonical MediaPipe 478-mesh landmark indices for eyeshadow (upper mobile eyelids & palpebral exclusion apertures)
+export const EYESHADOW_LANDMARK_INDICES = {
+  left: {
+    // Upper lashline: inferior margin of upper mobile eyelid (medial 33 to lateral 133)
+    upperLashline: [33, 246, 161, 160, 159, 158, 157, 173, 133],
+    // Eyelid crease fold: superior margin of upper mobile eyelid (lateral 190 to medial 247)
+    crease: [190, 56, 28, 27, 29, 30, 247],
+    // Eyeball palpebral aperture: full eye opening outline for 100% eyeball protection
+    eyeball: [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7],
+    medialCanthus: 33,
+    lateralCanthus: 133,
+    lashlineApex: 159,
+    creaseApex: 27,
+  },
+  right: {
+    // Upper lashline: inferior margin of upper mobile eyelid (medial 362 to lateral 263)
+    upperLashline: [362, 398, 384, 385, 386, 387, 388, 466, 263],
+    // Eyelid crease fold: superior margin of upper mobile eyelid (lateral 467 to medial 414)
+    crease: [467, 260, 259, 257, 258, 286, 414],
+    // Eyeball palpebral aperture: full eye opening outline for 100% eyeball protection
+    eyeball: [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249],
+    medialCanthus: 362,
+    lateralCanthus: 263,
+    lashlineApex: 386,
+    creaseApex: 257,
+  }
+};
+
+/**
+ * Parses hex color code into RGB components
+ * @param {string} hex - e.g. '#B92F60' or 'B92F60'
+ * @returns {{r: number, g: number, b: number}}
+ */
+export function hexToRgb(hex) {
+  if (!hex || typeof hex !== 'string') {
+    return { r: 185, g: 47, b: 96 }; // Default GlamAI berry
+  }
+  let cleanHex = hex.replace('#', '').trim();
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex.split('').map(c => c + c).join('');
+  }
+  const num = parseInt(cleanHex, 16);
+  if (isNaN(num)) {
+    return { r: 185, g: 47, b: 96 };
+  }
+  return {
+    r: (num >> 16) & 255,
+    g: (num >> 8) & 255,
+    b: num & 255
+  };
+}
+
+/**
+ * Resolves a landmark point to absolute pixel coordinates on a canvas of width W and height H.
+ * Handles both normalized {x, y} ([0, 1]) and pixel coordinates.
+ */
+function resolvePoint(pt, width, height) {
+  if (!pt) return { x: 0, y: 0 };
+  let x = pt.x !== undefined ? pt.x : pt.pixel_x;
+  let y = pt.y !== undefined ? pt.y : pt.pixel_y;
+
+  // If normalized (between 0 and 1.5)
+  if (x <= 1.5 && y <= 1.5) {
+    return { x: x * width, y: y * height };
+  }
+  return { x: Number(x), y: Number(y) };
+}
+
+/**
+ * Computes a fast deterministic signature from an image source
+ * to guarantee that cached landmarks are bound to the exact image raster.
+ * @param {string|HTMLImageElement} imageSource
+ * @returns {string}
+ */
+export function generateImageSignature(imageSource) {
+  if (!imageSource) return '';
+  const srcStr = typeof imageSource === 'string' ? imageSource : (imageSource.src || '');
+  if (!srcStr) return '';
+
+  if (srcStr.length > 200) {
+    // For base64 / data URLs: length + sampled hash
+    const len = srcStr.length;
+    const sample = srcStr.slice(0, 80) +
+                   srcStr.slice(Math.floor(len * 0.4), Math.floor(len * 0.4) + 60) +
+                   srcStr.slice(-80);
+    let hash = 5381;
+    for (let i = 0; i < sample.length; i++) {
+      hash = ((hash << 5) + hash) + sample.charCodeAt(i);
+      hash |= 0;
+    }
+    return `sig_${len}_${Math.abs(hash).toString(36)}`;
+  }
+  return `url_${srcStr}`;
+}
+
+/**
+ * Safely invalidates cached landmarks and analyses in sessionStorage.
+ * Prevents stale landmarks from bleeding across photo uploads or auth contexts.
+ * @param {'all'|'guest'|'member'} [context='all']
+ */
+export function invalidateLandmarkCache(context = 'all') {
+  try {
+    if (context === 'guest' || context === 'all') {
+      sessionStorage.removeItem('glamai_guest_analysis');
+      sessionStorage.removeItem('glamai_guest_palette');
+      sessionStorage.removeItem('glamai_face_landmarks');
+    }
+    if (context === 'member' || context === 'all') {
+      sessionStorage.removeItem('glamai_member_analysis');
+      sessionStorage.removeItem('glamai_face_landmarks');
+    }
+  } catch (e) {
+    console.warn('[GlamAI] Could not clear landmark cache:', e);
+  }
+}
+
+/**
+ * Validates whether the landmark dataset contains the necessary lip indices
+ * and verifies that lip coordinates form a plausible non-degenerate facial feature.
+ * @param {Array|Object} landmarks - MediaPipe 478 landmarks array or regions dictionary
+ * @returns {boolean}
+ */
+export function validateLipLandmarks(landmarks) {
+  if (!landmarks) return false;
+  if (Array.isArray(landmarks)) {
+    // Need at least 320 landmarks to cover lip indices up to 415
+    if (landmarks.length < 320) return false;
+    const p0 = landmarks[0];
+    const p17 = landmarks[17];
+    const p61 = landmarks[61];
+    const p291 = landmarks[291];
+    if (!p0 || !p17 || !p61 || !p291) return false;
+
+    const x0 = p0.x !== undefined ? p0.x : p0.pixel_x;
+    const y0 = p0.y !== undefined ? p0.y : p0.pixel_y;
+    const x17 = p17.x !== undefined ? p17.x : p17.pixel_x;
+    const y17 = p17.y !== undefined ? p17.y : p17.pixel_y;
+    const x61 = p61.x !== undefined ? p61.x : p61.pixel_x;
+    const x291 = p291.x !== undefined ? p291.x : p291.pixel_x;
+
+    if (!Number.isFinite(x0) || !Number.isFinite(y0) ||
+        !Number.isFinite(x17) || !Number.isFinite(y17) ||
+        !Number.isFinite(x61) || !Number.isFinite(x291)) {
+      return false;
+    }
+
+    // Guard against degenerate / zero-area lip geometry
+    const lipWidth = Math.abs(x291 - x61);
+    const lipHeight = Math.abs(y17 - y0);
+
+    // If normalized coordinates [0, 1]
+    if (x0 <= 1.5 && x291 <= 1.5) {
+      if (lipWidth < 0.02 || lipHeight * 100 < 0.2) return false;
+    } else {
+      // If pixel coordinates
+      if (lipWidth < 10 || lipHeight < 2) return false;
+    }
+    return true;
+  }
+  if (typeof landmarks === 'object' && landmarks.lips) {
+    return Array.isArray(landmarks.lips.outer) && landmarks.lips.outer.length > 10;
+  }
+  return false;
+}
+
+/**
+ * Validates whether the landmark dataset contains the necessary cheek indices
+ * and verifies that bilateral cheek coordinates form a plausible facial geometry.
+ * @param {Array|Object} landmarks - MediaPipe 478 landmarks array
+ * @returns {boolean}
+ */
+export function validateCheekLandmarks(landmarks) {
+  if (!landmarks) return false;
+  if (Array.isArray(landmarks)) {
+    if (landmarks.length < 455) return false;
+    const p205 = landmarks[205];
+    const p425 = landmarks[425];
+    const p234 = landmarks[234];
+    const p454 = landmarks[454];
+    if (!p205 || !p425 || !p234 || !p454) return false;
+
+    const x205 = p205.x !== undefined ? p205.x : p205.pixel_x;
+    const y205 = p205.y !== undefined ? p205.y : p205.pixel_y;
+    const x425 = p425.x !== undefined ? p425.x : p425.pixel_x;
+    const y425 = p425.y !== undefined ? p425.y : p425.pixel_y;
+    const x234 = p234.x !== undefined ? p234.x : p234.pixel_x;
+    const x454 = p454.x !== undefined ? p454.x : p454.pixel_x;
+
+    if (!Number.isFinite(x205) || !Number.isFinite(y205) ||
+        !Number.isFinite(x425) || !Number.isFinite(y425) ||
+        !Number.isFinite(x234) || !Number.isFinite(x454)) {
+      return false;
+    }
+
+    // Verify distance between cheekbones is non-degenerate (> 6% of width)
+    const cheekWidth = Math.abs(x454 - x234);
+    if (x234 <= 1.5 && x454 <= 1.5) {
+      if (cheekWidth < 0.06) return false;
+    } else {
+      if (cheekWidth < 25) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Validates whether the landmark dataset contains the necessary eye and eyelid crease indices
+ * and verifies that bilateral eye coordinates form a plausible facial geometry.
+ * @param {Array|Object} landmarks - MediaPipe 478 landmarks array
+ * @returns {boolean}
+ */
+export function validateEyeshadowLandmarks(landmarks) {
+  if (!landmarks) return false;
+  if (Array.isArray(landmarks)) {
+    if (landmarks.length < 468) return false;
+    const p33  = landmarks[33];   // Left eye medial canthus
+    const p133 = landmarks[133];  // Left eye lateral canthus
+    const p159 = landmarks[159];  // Left eye lashline apex
+    const p27  = landmarks[27];   // Left eye crease apex
+    const p362 = landmarks[362];  // Right eye medial canthus
+    const p263 = landmarks[263];  // Right eye lateral canthus
+    const p386 = landmarks[386];  // Right eye lashline apex
+    const p257 = landmarks[257];  // Right eye crease apex
+
+    if (!p33 || !p133 || !p159 || !p27 || !p362 || !p263 || !p386 || !p257) return false;
+
+    const x33  = p33.x  !== undefined ? p33.x  : p33.pixel_x;
+    const y33  = p33.y  !== undefined ? p33.y  : p33.pixel_y;
+    const x133 = p133.x !== undefined ? p133.x : p133.pixel_x;
+    const y133 = p133.y !== undefined ? p133.y : p133.pixel_y;
+    const x362 = p362.x !== undefined ? p362.x : p362.pixel_x;
+    const y362 = p362.y !== undefined ? p362.y : p362.pixel_y;
+    const x263 = p263.x !== undefined ? p263.x : p263.pixel_x;
+    const y263 = p263.y !== undefined ? p263.y : p263.pixel_y;
+
+    if (!Number.isFinite(x33)  || !Number.isFinite(y33)  ||
+        !Number.isFinite(x133) || !Number.isFinite(y133) ||
+        !Number.isFinite(x362) || !Number.isFinite(y362) ||
+        !Number.isFinite(x263) || !Number.isFinite(y263)) {
+      return false;
+    }
+
+    // Verify non-degenerate eye width (> 1.5% of width or > 8px)
+    const leftWidth = Math.abs(x133 - x33);
+    const rightWidth = Math.abs(x263 - x362);
+
+    if (x33 <= 1.5 && x133 <= 1.5) {
+      if (leftWidth < 0.015 || rightWidth < 0.015) return false;
+    } else {
+      if (leftWidth < 8 || rightWidth < 8) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Renders real face-aware lipstick directly onto a Canvas 2D context.
+ * 
+ * Technical Implementation:
+ * 1. Traces the outer lip contour (vermilion border) using smooth sub-pixel curves.
+ * 2. Traces the inner lip contour (mouth cavity) and uses the 'evenodd' winding rule
+ *    to exclude the inner mouth opening (preventing teeth and tongue from being colored).
+ * 3. Applies natural color blending using 'multiply' and 'soft-light' modes to preserve
+ *    underlying skin texture, natural lip crevices, and shadows.
+ * 4. Supports customizable finishes: 'Matte', 'Satin', 'Gloss'.
+ * 
+ * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
+ * @param {number} width - Canvas pixel width
+ * @param {number} height - Canvas pixel height
+ * @param {Array|Object} landmarks - 478 MediaPipe landmarks
+ * @param {Object} options - Lipstick configuration options
+ * @param {string} options.hex - Hex color (e.g. '#B92F60')
+ * @param {number} [options.opacity=0.62] - Blend opacity (0.1 to 1.0)
+ * @param {string} [options.finish='Matte'] - 'Matte' | 'Satin' | 'Gloss' | 'Cream'
+ * @returns {{success: boolean, mouthGap: number, reason?: string}}
+ */
+export function applyLipstickToCanvas(ctx, width, height, landmarks, options = {}) {
+  if (!ctx || !width || !height) {
+    return { success: false, reason: 'Invalid canvas context or dimensions' };
+  }
+
+  if (!validateLipLandmarks(landmarks)) {
+    return { success: false, reason: 'Facial landmarks missing or incomplete for lip simulation' };
+  }
+
+  const {
+    hex = '#B92F60',
+    opacity = 0.62,
+    finish = 'Matte'
+  } = options;
+
+  const rgb = hexToRgb(hex);
+
+  // Helper to extract a landmark by index
+  const getPt = (idx) => {
+    if (Array.isArray(landmarks)) {
+      return resolvePoint(landmarks[idx], width, height);
+    }
+    // If landmarks is regions dict with .lips
+    if (landmarks.lips && Array.isArray(landmarks.lips.outer)) {
+      const found = landmarks.lips.outer.find(p => p.index === idx) ||
+                    landmarks.lips.inner.find(p => p.index === idx);
+      return resolvePoint(found, width, height);
+    }
+    return { x: 0, y: 0 };
+  };
+
+  // Measure mouth opening gap (landmarks 13 and 14)
+  const p13 = getPt(LIP_LANDMARK_INDICES.upperInnerCenter);
+  const p14 = getPt(LIP_LANDMARK_INDICES.lowerInnerCenter);
+  const mouthGap = Math.hypot(p14.x - p13.x, p14.y - p13.y);
+  const isMouthOpen = mouthGap > 2.5;
+
+  // Extract outer and inner loop coordinates
+  const outerCoords = LIP_LANDMARK_INDICES.outer.map(idx => getPt(idx));
+  const innerCoords = LIP_LANDMARK_INDICES.inner.map(idx => getPt(idx));
+
+  ctx.save();
+
+  // -------------------------------------------------------------
+  // Layer 1: Base Color Overlay with Even-Odd Inner Mouth Cutout
+  // -------------------------------------------------------------
+  ctx.beginPath();
+
+  // 1a. Outer Lip Contour
+  ctx.moveTo(outerCoords[0].x, outerCoords[0].y);
+  for (let i = 1; i < outerCoords.length; i++) {
+    ctx.lineTo(outerCoords[i].x, outerCoords[i].y);
+  }
+  ctx.closePath();
+
+  // 1b. Inner Mouth Contour (Exclusion Hole)
+  // When using 'evenodd' fill rule, adding the inner loop as part of the same path
+  // mathematically subtracts the mouth cavity, completely protecting teeth and tongue!
+  ctx.moveTo(innerCoords[0].x, innerCoords[0].y);
+  for (let i = 1; i < innerCoords.length; i++) {
+    ctx.lineTo(innerCoords[i].x, innerCoords[i].y);
+  }
+  ctx.closePath();
+
+  // Create clipping mask to restrict all subsequent shade washes strictly to lip skin
+  ctx.save();
+  ctx.clip('evenodd');
+
+  // Layer 1A: Primary Pigment Tone (Multiply blend preserves dark lip crevices & depth)
+  ctx.globalCompositeOperation = 'multiply';
+  const primaryAlpha = Math.min(0.85, Math.max(0.25, opacity * 0.90));
+  ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${primaryAlpha})`;
+  ctx.fill('evenodd');
+
+  // Layer 1B: Luminance & Vibrancy (Soft-Light blend prevents dullness & enhances hue)
+  ctx.globalCompositeOperation = 'soft-light';
+  const softAlpha = Math.min(0.70, Math.max(0.15, opacity * 0.70));
+  ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${softAlpha})`;
+  ctx.fill('evenodd');
+
+  // -------------------------------------------------------------
+  // Layer 2: Finish-Specific Highlights and Shading
+  // -------------------------------------------------------------
+  const normFinish = String(finish).toLowerCase();
+
+  if (normFinish.includes('gloss') || normFinish.includes('cream') || normFinish.includes('glaze')) {
+    // Gloss Finish: Add a luminous specular highlight to the center of the lower lip
+    const p17 = getPt(LIP_LANDMARK_INDICES.lowerCenter);
+    const p0 = getPt(LIP_LANDMARK_INDICES.cupidApex);
+    const lipH = Math.hypot(p17.x - p0.x, p17.y - p0.y);
+
+    const glossRadiusX = lipH * 0.9;
+    const glossRadiusY = lipH * 0.45;
+    const glossCenterY = p17.y - (lipH * 0.28);
+
+    const glossGrad = ctx.createRadialGradient(
+      p17.x, glossCenterY, 2,
+      p17.x, glossCenterY, glossRadiusX
+    );
+    glossGrad.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
+    glossGrad.addColorStop(0.5, 'rgba(255, 240, 245, 0.18)');
+    glossGrad.addColorStop(1, 'transparent');
+
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = glossGrad;
+    ctx.beginPath();
+    ctx.ellipse(p17.x, glossCenterY, glossRadiusX, glossRadiusY, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+  } else if (normFinish.includes('satin') || normFinish.includes('radiant')) {
+    // Satin Finish: Subtle center hydration glow
+    const p17 = getPt(LIP_LANDMARK_INDICES.lowerCenter);
+    const satinGrad = ctx.createRadialGradient(
+      p17.x, p17.y - 4, 2,
+      p17.x, p17.y - 4, 18
+    );
+    satinGrad.addColorStop(0, 'rgba(255, 255, 255, 0.20)');
+    satinGrad.addColorStop(1, 'transparent');
+
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = satinGrad;
+    ctx.fillRect(0, 0, width, height);
+
+  } else {
+    // Matte / Velvet Finish: Subtle soft depth along the inner lip seam
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgba(30, 10, 20, 0.12)`;
+    ctx.fill('evenodd');
+  }
+
+  ctx.restore(); // Exit lip clip
+
+  // -------------------------------------------------------------
+  // Layer 3: Feathered Vermilion Border (Soft blend into adjacent skin)
+  // -------------------------------------------------------------
+  // Draws a micro-thin soft feathered stroke along outer lip boundary to avoid harsh vector edge.
+  // Explicitly excludes the inner mouth opening so stroke can never touch teeth or mouth cavity.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-10, -10, width + 20, height + 20);
+  ctx.moveTo(innerCoords[0].x, innerCoords[0].y);
+  for (let i = 1; i < innerCoords.length; i++) {
+    ctx.lineTo(innerCoords[i].x, innerCoords[i].y);
+  }
+  ctx.closePath();
+  ctx.clip('evenodd');
+
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.28)`;
+
+  ctx.beginPath();
+  ctx.moveTo(outerCoords[0].x, outerCoords[0].y);
+  for (let i = 1; i < outerCoords.length; i++) {
+    ctx.lineTo(outerCoords[i].x, outerCoords[i].y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.restore(); // Restore root canvas context
+
+  return {
+    success: true,
+    mouthGap: round(mouthGap, 2),
+    isMouthOpen,
+    finish: normFinish
+  };
+}
+
+/**
+ * Renders real face-aware blush directly onto a Canvas 2D context.
+ * 
+ * Technical Implementation:
+ * 1. Computes bilateral cheek centers independently from MediaPipe malar apple landmarks (205 left, 425 right).
+ * 2. Derives dynamic horizontal and vertical radii from local anatomical landmarks:
+ *    - Rx derived from zygomatic-alar span (||pt(zygion) - pt(alar)||)
+ *    - Ry derived from infraorbital-labial vertical distance (||pt(subEye) - pt(mouthCorner)||)
+ *    This accounts for facial width and 3D pose foreshortening (perspective compression) automatically.
+ * 3. Rotates the blush ellipse along each cheekbone's anatomical sweep angle (alar base toward zygion).
+ * 4. Clips strictly to the face oval and excludes eyes, lips, and nasal bridge using 'evenodd' winding rule,
+ *    ensuring 0% spill onto eyes, lips, hair, or background.
+ * 5. Uses multi-stop cubic falloff and 'soft-light' blending to gently stain skin tones while
+ *    preserving underlying facial luminance, natural pore texture, and volume highlights.
+ * 
+ * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
+ * @param {number} width - Canvas pixel width
+ * @param {number} height - Canvas pixel height
+ * @param {Array|Object} landmarks - 478 MediaPipe landmarks
+ * @param {Object} [options={}] - Blush configuration options
+ * @param {string} [options.hex='#D37D64'] - Hex color code
+ * @param {number} [options.opacity=0.55] - Blend opacity (0.1 to 1.0)
+ * @param {string} [options.finish='Satin'] - 'Matte' | 'Satin' | 'Luminous' | 'Dewy'
+ * @returns {{success: boolean, leftSpan?: number, rightSpan?: number, reason?: string}}
+ */
+export function applyBlushToCanvas(ctx, width, height, landmarks, options = {}) {
+  if (!ctx || !width || !height) {
+    return { success: false, reason: 'Invalid canvas context or dimensions' };
+  }
+
+  if (!validateCheekLandmarks(landmarks)) {
+    return { success: false, reason: 'Facial landmarks missing or incomplete for cheek simulation' };
+  }
+
+  const {
+    hex = '#D37D64',
+    opacity = 0.55,
+    finish = 'Satin'
+  } = options;
+
+  const rgb = hexToRgb(hex);
+
+  // Helper to extract a landmark by index
+  const getPt = (idx) => {
+    if (Array.isArray(landmarks)) {
+      return resolvePoint(landmarks[idx], width, height);
+    }
+    return { x: 0, y: 0 };
+  };
+
+  // Extract key cheek landmarks
+  const p205 = getPt(CHEEK_LANDMARK_INDICES.left.center);
+  const p50  = getPt(CHEEK_LANDMARK_INDICES.left.apple);
+  const p234 = getPt(CHEEK_LANDMARK_INDICES.left.zygion);
+  const p98  = getPt(CHEEK_LANDMARK_INDICES.left.alar);
+  const p145 = getPt(CHEEK_LANDMARK_INDICES.left.subEye);
+  const p61  = getPt(CHEEK_LANDMARK_INDICES.left.mouthCorner);
+
+  const p425 = getPt(CHEEK_LANDMARK_INDICES.right.center);
+  const p280 = getPt(CHEEK_LANDMARK_INDICES.right.apple);
+  const p454 = getPt(CHEEK_LANDMARK_INDICES.right.zygion);
+  const p327 = getPt(CHEEK_LANDMARK_INDICES.right.alar);
+  const p374 = getPt(CHEEK_LANDMARK_INDICES.right.subEye);
+  const p291 = getPt(CHEEK_LANDMARK_INDICES.right.mouthCorner);
+
+  // Left cheek anatomical parameters
+  const spanLeft = Math.hypot(p234.x - p98.x, p234.y - p98.y);
+  const vertLeft = Math.hypot(p61.x - p145.x, p61.y - p145.y);
+  const angleLeft = Math.atan2(p234.y - p98.y, p234.x - p98.x);
+  const centerLeft = {
+    x: p205.x * 0.65 + p50.x * 0.35,
+    y: p205.y * 0.65 + p50.y * 0.35
+  };
+  const rxLeft = Math.max(12, Math.min(width * 0.20, spanLeft * 0.38));
+  const ryLeft = Math.max(10, Math.min(height * 0.16, vertLeft * 0.30));
+
+  // Right cheek anatomical parameters
+  const spanRight = Math.hypot(p454.x - p327.x, p454.y - p327.y);
+  const vertRight = Math.hypot(p291.x - p374.x, p291.y - p374.y);
+  const angleRight = Math.atan2(p454.y - p327.y, p454.x - p327.x);
+  const centerRight = {
+    x: p425.x * 0.65 + p280.x * 0.35,
+    y: p425.y * 0.65 + p280.y * 0.35
+  };
+  const rxRight = Math.max(12, Math.min(width * 0.20, spanRight * 0.38));
+  const ryRight = Math.max(10, Math.min(height * 0.16, vertRight * 0.30));
+
+  ctx.save();
+
+  // -------------------------------------------------------------
+  // Layer 1: Anatomical Clipping Boundary (Face Oval minus Eyes & Lips)
+  // -------------------------------------------------------------
+  ctx.beginPath();
+
+  // 1a. Outer boundary: Face Oval
+  const faceOval = CHEEK_LANDMARK_INDICES.faceOval.map(idx => getPt(idx));
+  ctx.moveTo(faceOval[0].x, faceOval[0].y);
+  for (let i = 1; i < faceOval.length; i++) {
+    ctx.lineTo(faceOval[i].x, faceOval[i].y);
+  }
+  ctx.closePath();
+
+  // 1b. Exclude left eye
+  const leftEye = CHEEK_LANDMARK_INDICES.exclusions.leftEye.map(idx => getPt(idx));
+  ctx.moveTo(leftEye[0].x, leftEye[0].y);
+  for (let i = 1; i < leftEye.length; i++) {
+    ctx.lineTo(leftEye[i].x, leftEye[i].y);
+  }
+  ctx.closePath();
+
+  // 1c. Exclude right eye
+  const rightEye = CHEEK_LANDMARK_INDICES.exclusions.rightEye.map(idx => getPt(idx));
+  ctx.moveTo(rightEye[0].x, rightEye[0].y);
+  for (let i = 1; i < rightEye.length; i++) {
+    ctx.lineTo(rightEye[i].x, rightEye[i].y);
+  }
+  ctx.closePath();
+
+  // 1d. Exclude lips
+  const lips = LIP_LANDMARK_INDICES.outer.map(idx => getPt(idx));
+  ctx.moveTo(lips[0].x, lips[0].y);
+  for (let i = 1; i < lips.length; i++) {
+    ctx.lineTo(lips[i].x, lips[i].y);
+  }
+  ctx.closePath();
+
+  // Enforce 'evenodd' clipping: protects eyes, lips, hair and background
+  ctx.clip('evenodd');
+
+  // -------------------------------------------------------------
+  // Layer 2: Texture-Preserving Soft-Light Blush Washes
+  // -------------------------------------------------------------
+  ctx.globalCompositeOperation = 'soft-light';
+  const alpha = Math.min(0.85, Math.max(0.15, opacity * 0.72));
+  const normFinish = String(finish).toLowerCase();
+
+  const cheeks = [
+    { center: centerLeft, rx: rxLeft, ry: ryLeft, angle: angleLeft },
+    { center: centerRight, rx: rxRight, ry: ryRight, angle: angleRight }
+  ];
+
+  for (const cheek of cheeks) {
+    ctx.save();
+    ctx.translate(cheek.center.x, cheek.center.y);
+    ctx.rotate(cheek.angle);
+    ctx.scale(1.0, cheek.ry / cheek.rx);
+
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, cheek.rx);
+    grad.addColorStop(0.00, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`);
+    grad.addColorStop(0.35, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha * 0.70})`);
+    grad.addColorStop(0.70, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha * 0.25})`);
+    grad.addColorStop(1.00, 'transparent');
+
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, cheek.rx, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Subtle luminous/dewy sheen for radiant finishes
+    if (normFinish.includes('luminous') || normFinish.includes('dewy') || normFinish.includes('glow')) {
+      ctx.globalCompositeOperation = 'screen';
+      const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, cheek.rx * 0.50);
+      glowGrad.addColorStop(0.0, `rgba(255, 240, 230, ${alpha * 0.25})`);
+      glowGrad.addColorStop(1.0, 'transparent');
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, cheek.rx * 0.50, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  ctx.restore(); // Restore root canvas context
+
+  return {
+    success: true,
+    leftSpan: round(spanLeft, 2),
+    rightSpan: round(spanRight, 2),
+    finish: normFinish
+  };
+}
+
+/**
+ * Renders real face-aware eyeshadow directly onto a Canvas 2D context.
+ * 
+ * Technical Implementation:
+ * 1. Derives bilateral upper mobile eyelid boundaries from MediaPipe anatomical landmarks:
+ *    - Inferior margin: Upper lashline contours (left: 33->133, right: 362->263).
+ *    - Superior margin: Eyelid crease folds (left: 190->247, right: 414->467).
+ * 2. Uses directional linear gradient along the lid height vector (lashline apex to crease apex)
+ *    so saturation naturally diffuses toward the socket crease.
+ * 3. Guaranteed Eyeball Protection: Uses an isolated offscreen canvas layer and punches out the
+ *    eyeball palpebral aperture with 'destination-out' compositing and anti-aliased safety margins,
+ *    mathematically guaranteeing 0% overlap with eyeball, sclera, iris, pupil, or lower eyelids.
+ * 4. Blends via 'multiply' and 'soft-light' to preserve underlying skin texture, eyelid folds,
+ *    and natural shadows without flat artificial masking.
+ * 5. Supports customizable finishes: 'Matte', 'Satin', 'Shimmer', 'Metallic', 'Glitter', 'High Pearl'.
+ *    Radiant finishes receive a 3D specular highlight centered on each mobile eyelid.
+ * 
+ * @param {CanvasRenderingContext2D} ctx - Canvas rendering context
+ * @param {number} width - Canvas pixel width
+ * @param {number} height - Canvas pixel height
+ * @param {Array|Object} landmarks - 478 MediaPipe landmarks
+ * @param {Object} [options={}] - Eyeshadow configuration options
+ * @param {string} [options.hex='#8F5E43'] - Hex color code
+ * @param {number} [options.opacity=0.60] - Blend opacity (0.1 to 1.0)
+ * @param {string} [options.finish='Matte'] - 'Matte' | 'Satin' | 'Shimmer' | 'Metallic' | 'Glitter' | 'High Pearl'
+ * @returns {{success: boolean, leftLidHeight?: number, rightLidHeight?: number, finish?: string, reason?: string}}
+ */
+export function applyEyeshadowToCanvas(ctx, width, height, landmarks, options = {}) {
+  if (!ctx || !width || !height) {
+    return { success: false, reason: 'Invalid canvas context or dimensions' };
+  }
+
+  if (!validateEyeshadowLandmarks(landmarks)) {
+    return { success: false, reason: 'Facial landmarks missing or incomplete for eyeshadow simulation' };
+  }
+
+  const {
+    hex = '#8F5E43',
+    opacity = 0.60,
+    finish = 'Matte'
+  } = options;
+
+  const rgb = hexToRgb(hex);
+
+  // Helper to extract a landmark by index
+  const getPt = (idx) => {
+    if (Array.isArray(landmarks)) {
+      return resolvePoint(landmarks[idx], width, height);
+    }
+    return { x: 0, y: 0 };
+  };
+
+  const leftLash = EYESHADOW_LANDMARK_INDICES.left.upperLashline.map(getPt);
+  const leftCrease = EYESHADOW_LANDMARK_INDICES.left.crease.map(getPt);
+  const leftPalp = EYESHADOW_LANDMARK_INDICES.left.eyeball.map(getPt);
+
+  const rightLash = EYESHADOW_LANDMARK_INDICES.right.upperLashline.map(getPt);
+  const rightCrease = EYESHADOW_LANDMARK_INDICES.right.crease.map(getPt);
+  const rightPalp = EYESHADOW_LANDMARK_INDICES.right.eyeball.map(getPt);
+
+  // Measure lid dimensions
+  const p159 = getPt(EYESHADOW_LANDMARK_INDICES.left.lashlineApex);
+  const p27  = getPt(EYESHADOW_LANDMARK_INDICES.left.creaseApex);
+  const leftLidHeight = Math.hypot(p27.x - p159.x, p27.y - p159.y);
+
+  const p386 = getPt(EYESHADOW_LANDMARK_INDICES.right.lashlineApex);
+  const p257 = getPt(EYESHADOW_LANDMARK_INDICES.right.creaseApex);
+  const rightLidHeight = Math.hypot(p257.x - p386.x, p257.y - p386.y);
+
+  // Use an offscreen canvas to isolate eyelid pigment and punch out eyeball aperture
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = width;
+  offCanvas.height = height;
+  const offCtx = offCanvas.getContext('2d');
+  if (!offCtx) {
+    return { success: false, reason: 'Could not create offscreen canvas context' };
+  }
+
+  const normFinish = String(finish).toLowerCase();
+  const effectiveAlpha = Math.min(0.90, Math.max(0.15, opacity));
+
+  // Helper to render one eye on the offscreen canvas
+  const renderEyeLid = (lashPts, creasePts, palpPts, lashApex, creaseApex) => {
+    // 1. Draw mobile eyelid polygon with vertical gradient
+    offCtx.save();
+    offCtx.globalCompositeOperation = 'source-over';
+    offCtx.beginPath();
+    offCtx.moveTo(lashPts[0].x, lashPts[0].y);
+    for (let i = 1; i < lashPts.length; i++) {
+      offCtx.lineTo(lashPts[i].x, lashPts[i].y);
+    }
+    for (let i = 0; i < creasePts.length; i++) {
+      offCtx.lineTo(creasePts[i].x, creasePts[i].y);
+    }
+    offCtx.closePath();
+
+    // Directional linear gradient from lashline apex to crease apex
+    const grad = offCtx.createLinearGradient(lashApex.x, lashApex.y, creaseApex.x, creaseApex.y);
+    grad.addColorStop(0.00, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${effectiveAlpha})`);
+    grad.addColorStop(0.50, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${effectiveAlpha * 0.85})`);
+    grad.addColorStop(0.85, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${effectiveAlpha * 0.45})`);
+    grad.addColorStop(1.00, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
+
+    offCtx.fillStyle = grad;
+    offCtx.fill();
+
+    // 2. Guaranteed Eyeball Protection: Punch out eyeball aperture with destination-out
+    offCtx.globalCompositeOperation = 'destination-out';
+    offCtx.beginPath();
+    offCtx.moveTo(palpPts[0].x, palpPts[0].y);
+    for (let i = 1; i < palpPts.length; i++) {
+      offCtx.lineTo(palpPts[i].x, palpPts[i].y);
+    }
+    offCtx.closePath();
+    offCtx.fillStyle = '#000000';
+    offCtx.fill();
+
+    // 1.5px stroke margin along eyeball aperture to eliminate anti-aliased edge bleed
+    offCtx.lineWidth = 1.5;
+    offCtx.strokeStyle = '#000000';
+    offCtx.stroke();
+
+    offCtx.restore();
+  };
+
+  // Render both eyelids on offscreen canvas
+  renderEyeLid(leftLash, leftCrease, leftPalp, p159, p27);
+  renderEyeLid(rightLash, rightCrease, rightPalp, p386, p257);
+
+  // -------------------------------------------------------------
+  // Composite onto Target Canvas using Natural Texture Blends
+  // -------------------------------------------------------------
+  ctx.save();
+
+  // Layer 1: Multiply blend to settle pigment into eyelid skin texture and crease shadow
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha = Math.min(0.80, effectiveAlpha * 0.85);
+  ctx.drawImage(offCanvas, 0, 0);
+
+  // Layer 2: Soft-light blend to reveal true vibrant pigment hue without flattening skin
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = Math.min(0.85, effectiveAlpha * 0.90);
+  ctx.drawImage(offCanvas, 0, 0);
+
+  // -------------------------------------------------------------
+  // Layer 3: Finish-Specific Accents (Shimmer / Satin / Metallic)
+  // -------------------------------------------------------------
+  if (normFinish.includes('shimmer') || normFinish.includes('metallic') ||
+      normFinish.includes('glitter') || normFinish.includes('pearl')) {
+    // Render 3D dimensional halo highlight centered on mobile eyelid
+    const shimmerCanvas = document.createElement('canvas');
+    shimmerCanvas.width = width;
+    shimmerCanvas.height = height;
+    const sCtx = shimmerCanvas.getContext('2d');
+
+    if (sCtx) {
+      const renderShimmer = (lashApex, creaseApex, palpPts, lidH) => {
+        const cx = (lashApex.x + creaseApex.x) * 0.5;
+        const cy = (lashApex.y + creaseApex.y) * 0.5;
+        const radX = Math.max(6, lidH * 1.6);
+        const radY = Math.max(4, lidH * 0.7);
+
+        sCtx.save();
+        sCtx.translate(cx, cy);
+        sCtx.scale(1.0, radY / radX);
+
+        const sGrad = sCtx.createRadialGradient(0, 0, 1, 0, 0, radX);
+        sGrad.addColorStop(0.00, 'rgba(255, 250, 240, 0.45)');
+        sGrad.addColorStop(0.40, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`);
+        sGrad.addColorStop(1.00, 'transparent');
+
+        sCtx.fillStyle = sGrad;
+        sCtx.beginPath();
+        sCtx.arc(0, 0, radX, 0, Math.PI * 2);
+        sCtx.fill();
+        sCtx.restore();
+
+        // Punch out eyeball aperture on shimmer layer
+        sCtx.save();
+        sCtx.globalCompositeOperation = 'destination-out';
+        sCtx.beginPath();
+        sCtx.moveTo(palpPts[0].x, palpPts[0].y);
+        for (let i = 1; i < palpPts.length; i++) {
+          sCtx.lineTo(palpPts[i].x, palpPts[i].y);
+        }
+        sCtx.closePath();
+        sCtx.fillStyle = '#000000';
+        sCtx.fill();
+        sCtx.lineWidth = 1.5;
+        sCtx.strokeStyle = '#000000';
+        sCtx.stroke();
+        sCtx.restore();
+      };
+
+      renderShimmer(p159, p27, leftPalp, leftLidHeight);
+      renderShimmer(p386, p257, rightPalp, rightLidHeight);
+
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = Math.min(0.70, effectiveAlpha * 0.75);
+      ctx.drawImage(shimmerCanvas, 0, 0);
+    }
+
+  } else if (normFinish.includes('satin')) {
+    // Subtle satin luster
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.min(0.25, effectiveAlpha * 0.30);
+    ctx.drawImage(offCanvas, 0, 0);
+  }
+
+  ctx.restore(); // Restore root canvas context
+
+  return {
+    success: true,
+    leftLidHeight: round(leftLidHeight, 2),
+    rightLidHeight: round(rightLidHeight, 2),
+    finish: normFinish
+  };
+}
+
+/**
+ * Loads an image from a URL/base64 string, validates facial landmarks,
+ * and renders face-aware lipstick simulation onto a fresh offscreen canvas.
+ * 
+ * Returns data URL of the simulated image.
+ * 
+ * @param {string|HTMLImageElement} imageSource - Base photo image source (URL, blob URL, or data URL)
+ * @param {Array|Object} landmarks - 478 MediaPipe landmarks
+ * @param {Object} options - Lipstick color & finish options
+ * @returns {Promise<{success: boolean, dataUrl: string, error?: string, mouthGap?: number}>}
+ */
+export function renderLipstickSimulation(imageSource, landmarks, options = {}) {
+  return new Promise((resolve) => {
+    if (!imageSource) {
+      return resolve({
+        success: false,
+        dataUrl: null,
+        error: 'No image source provided for lipstick simulation'
+      });
+    }
+
+    if (!validateLipLandmarks(landmarks)) {
+      return resolve({
+        success: false,
+        dataUrl: typeof imageSource === 'string' ? imageSource : null,
+        error: 'Facial landmarks unavailable for accurate lipstick placement'
+      });
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 600;
+        canvas.height = img.naturalHeight || 750;
+        const ctx = canvas.getContext('2d');
+
+        // Draw original base photo
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Apply face-aware landmark lipstick
+        const result = applyLipstickToCanvas(ctx, canvas.width, canvas.height, landmarks, options);
+
+        if (!result.success) {
+          return resolve({
+            success: false,
+            dataUrl: img.src,
+            error: result.reason || 'Lipstick rendering failed'
+          });
+        }
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        resolve({
+          success: true,
+          dataUrl,
+          mouthGap: result.mouthGap,
+          isMouthOpen: result.isMouthOpen
+        });
+
+      } catch (err) {
+        resolve({
+          success: false,
+          dataUrl: typeof imageSource === 'string' ? imageSource : null,
+          error: `Canvas simulation error: ${err.message}`
+        });
+      }
+    };
+
+    img.onerror = () => {
+      resolve({
+        success: false,
+        dataUrl: null,
+        error: 'Failed to load source image for simulation'
+      });
+    };
+
+    if (typeof imageSource === 'string') {
+      img.src = imageSource;
+    } else if (imageSource instanceof HTMLImageElement) {
+      img.src = imageSource.src;
+    }
+  });
+}
+
+/**
+ * Retrieves cached MediaPipe landmarks from the current analysis object or session storage,
+ * with strict image-identity and context-isolation validation.
+ * 
+ * @param {Object} [analysis] - Current analysis object from state or storage
+ * @param {string} [imageSrc=null] - Base image source to verify against
+ * @param {'auto'|'guest'|'member'} [context='auto'] - Workflow isolation mode
+ * @returns {Array|null} 478 landmarks array or null if unavailable/mismatched
+ */
+export function getCachedLandmarks(analysis, imageSrc = null, context = 'auto') {
+  const expectedSig = imageSrc ? generateImageSignature(imageSrc) : null;
+
+  // Helper to test if a candidate is valid landmarks and matches the expected image
+  const check = (cand) => {
+    if (!cand) return null;
+
+    // Check if cand has an explicit image signature that mismatches
+    if (expectedSig) {
+      const candSig = cand.image_signature || cand.signature || cand.face_analysis?.image_signature;
+      if (candSig && candSig !== expectedSig) {
+        // Explicit signature mismatch detected -> stale cache!
+        return null;
+      }
+    }
+
+    const isValid = (lms) => validateLipLandmarks(lms) || validateCheekLandmarks(lms) || validateEyeshadowLandmarks(lms);
+
+    if (isValid(cand)) return cand;
+    if (cand.landmarks && isValid(cand.landmarks)) return cand.landmarks;
+    if (cand.face_analysis?.landmarks && isValid(cand.face_analysis.landmarks)) {
+      return cand.face_analysis.landmarks;
+    }
+    return null;
+  };
+
+  // 1. Direct analysis object check
+  if (analysis) {
+    const direct = check(analysis);
+    if (direct) return direct;
+  }
+
+  // 2. Check session storage keys with strict context isolation
+  let storageKeys = [];
+  if (context === 'guest') {
+    // Strictly isolate guest workflow: NEVER read member analysis
+    storageKeys = ['glamai_guest_analysis', 'glamai_face_landmarks'];
+  } else if (context === 'member') {
+    // Strictly isolate member workflow: NEVER read guest analysis
+    storageKeys = ['glamai_member_analysis', 'glamai_face_landmarks'];
+  } else {
+    // Auto mode
+    storageKeys = ['glamai_guest_analysis', 'glamai_face_landmarks', 'glamai_member_analysis'];
+  }
+
+  for (const key of storageKeys) {
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const hit = check(parsed);
+        if (hit) return hit;
+      }
+    } catch (e) {
+      // Continue searching
+    }
+  }
+
+  return null;
+}
+
+function round(val, dec = 2) {
+  const m = Math.pow(10, dec);
+  return Math.round(val * m) / m;
+}

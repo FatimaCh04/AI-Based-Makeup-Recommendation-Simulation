@@ -1,0 +1,101 @@
+"""
+EfficientNetB0 skin-type inference service for GlamAI.
+Experimental prediction; user confirmation required.
+"""
+
+import io
+import json
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageOps
+
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+MODEL_DIR = BACKEND_DIR / "models"
+CONFIG_PATH = MODEL_DIR / "skin_type_config.json"
+
+_model = None
+_config = None
+
+
+def load_skin_type_model():
+    global _model, _config
+
+    if _model is not None:
+        return _model, _config
+
+    import tensorflow as tf
+
+    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    model_path = MODEL_DIR / config["model_file"]
+
+    if not model_path.is_file():
+        raise FileNotFoundError(
+            f"Skin-type model not found: {model_path}"
+        )
+
+    if config["class_names"] != ["dry", "normal", "oily"]:
+        raise ValueError("Unexpected skin-type class mapping.")
+
+    if config.get("external_normalization") is not False:
+        raise ValueError("Unexpected preprocessing configuration.")
+
+    model = tf.keras.models.load_model(
+        model_path,
+        compile=False
+    )
+
+    if tuple(model.input_shape[1:]) != (224, 224, 3):
+        raise ValueError("Unexpected model input shape.")
+
+    if model.output_shape[-1] != 3:
+        raise ValueError("Unexpected model output shape.")
+
+    _model = model
+    _config = config
+
+    return _model, _config
+
+
+def predict_skin_type(image_bytes):
+    model, config = load_skin_type_model()
+
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
+        image = image.resize(
+            (224, 224),
+            Image.Resampling.BILINEAR
+        )
+
+        image_array = np.asarray(
+            image,
+            dtype=np.float32
+        )
+
+    # EfficientNetB0 handles preprocessing internally.
+    # Do not divide pixels by 255.
+    batch = np.expand_dims(image_array, axis=0)
+
+    probabilities = model.predict(
+        batch,
+        verbose=0
+    )[0]
+
+    class_names = config["class_names"]
+    predicted_index = int(np.argmax(probabilities))
+
+    return {
+        "skin_type": class_names[predicted_index].capitalize(),
+        "model_score": round(float(probabilities[predicted_index]), 4),
+        "probabilities": {
+            name: round(float(probabilities[i]), 4)
+            for i, name in enumerate(class_names)
+        },
+        "model": "EfficientNetB0",
+        "requires_user_confirmation": True,
+        "is_medical_diagnosis": False
+    }

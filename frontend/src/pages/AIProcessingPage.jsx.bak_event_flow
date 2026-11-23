@@ -1,0 +1,313 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, CheckCircle2, Loader2, Sparkles, ScanFace, AlertCircle } from 'lucide-react';
+import { analysisService } from '../services/analysisService';
+import { useAuth } from '../context/AuthContext';
+
+// In-flight request tracker shared across React StrictMode mount/unmount cycles
+// Prevents duplicate HTTP requests to Flask while ensuring the active component receives the result
+let inFlightAnalysisPromise = null;
+let inFlightAnalysisImage = null;
+
+export default function AIProcessingPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isAuthenticated } = useAuth();
+
+  const [progress, setProgress] = useState(15);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [error, setError] = useState('');
+  const [isFinished, setIsFinished] = useState(false);
+
+  const capturedImage = location.state?.capturedImage ||
+    sessionStorage.getItem('glamai_guest_image') || null;
+
+  const selectedEvent = location.state?.selectedEvent || {
+    name: sessionStorage.getItem('glamai_guest_occasion') || 'Party',
+    id: 'party'
+  };
+
+  useEffect(() => {
+    let isSubscribed = true;
+    let progressTimer = null;
+
+    if (!capturedImage) {
+      setError('No photo was provided for analysis. Please capture or upload a clear photo.');
+      return;
+    }
+
+    if (!capturedImage.startsWith('data:image/') && !capturedImage.startsWith('blob:')) {
+      setError('Please upload or capture a valid photo (JPEG, PNG, or WEBP).');
+      return;
+    }
+
+    // Preserve selected occasion in sessionStorage
+    if (selectedEvent?.name) {
+      sessionStorage.setItem('glamai_guest_occasion', selectedEvent.name);
+    }
+
+    // Start animated progress immediately on mount
+    progressTimer = setInterval(() => {
+      if (!isSubscribed) return;
+      setProgress((prev) => {
+        const next = Math.min(prev + 5, 88);
+        if (next >= 75) setCurrentStep(4);
+        else if (next >= 50) setCurrentStep(3);
+        else if (next >= 25) setCurrentStep(2);
+        return next;
+      });
+    }, 350);
+
+    const runAnalysis = async () => {
+      setError('');
+
+      try {
+        // Reuse in-flight request if already started for this exact image (handles React StrictMode cleanly)
+        if (!inFlightAnalysisPromise || inFlightAnalysisImage !== capturedImage) {
+          inFlightAnalysisImage = capturedImage;
+          inFlightAnalysisPromise = (async () => {
+            const response = await fetch(capturedImage);
+            const blob = await response.blob();
+            if (blob.size === 0) {
+              throw new Error('The selected photo is empty. Please capture or upload another photo.');
+            }
+            const imageFile = new File(
+              [blob],
+              'makeup-analysis.jpg',
+              { type: blob.type || 'image/jpeg' }
+            );
+            return await analysisService.analyzePhoto(imageFile);
+          })();
+        }
+
+        // Wait for real backend analysis from Flask
+        const result = await inFlightAnalysisPromise;
+        const analysisData = result.analysis || result;
+
+        if (!analysisData?.face_detected) {
+          throw new Error(
+            result?.error || 'No clear face detected in this photo. Please upload a clear front-facing photo with good lighting.'
+          );
+        }
+
+        // If component unmounted (e.g., user clicked back), ignore
+        if (!isSubscribed) return;
+
+        clearInterval(progressTimer);
+
+        // Store real analysis and image in sessionStorage
+        sessionStorage.setItem('glamai_guest_image', capturedImage);
+        sessionStorage.setItem(
+          'glamai_guest_analysis',
+          JSON.stringify(analysisData)
+        );
+
+        setProgress(100);
+        setCurrentStep(5);
+        setIsFinished(true);
+
+        // Reset in-flight tracker upon completion
+        inFlightAnalysisPromise = null;
+        inFlightAnalysisImage = null;
+
+        const isAuth = isAuthenticated || !!localStorage.getItem('glamai_token');
+        const targetRoute = isAuth ? '/result' : '/guest/results';
+
+        setTimeout(() => {
+          if (isSubscribed) {
+            navigate(targetRoute, {
+              state: {
+                capturedImage,
+                selectedEvent,
+                analysis: analysisData
+              }
+            });
+          }
+        }, 500);
+
+      } catch (err) {
+        // Reset in-flight tracker on error so retries start fresh
+        inFlightAnalysisPromise = null;
+        inFlightAnalysisImage = null;
+
+        if (!isSubscribed) return;
+
+        clearInterval(progressTimer);
+        console.error('[GlamAI] Analysis error:', err);
+
+        const errorMessage =
+          err?.response?.data?.error ||
+          err?.message ||
+          'Analysis could not be completed. Please ensure the backend server is running and try again.';
+
+        setError(errorMessage);
+      }
+    };
+
+    runAnalysis();
+
+    return () => {
+      isSubscribed = false;
+      if (progressTimer) clearInterval(progressTimer);
+    };
+  }, [capturedImage, navigate, selectedEvent, isAuthenticated]);
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 pb-12 font-sans text-[#30232A]">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => navigate('/capture')}
+          className="p-2.5 rounded-2xl bg-white border border-[#F8DCE5] text-[#30232A] hover:bg-[#FFF1F5] hover:text-[#B92F60] transition-colors shadow-2xs"
+          aria-label="Back to Capture"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div>
+          <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#30232A]">
+            Analyzing Your Face...
+          </h1>
+          <p className="text-xs text-[#30232A]/60">
+            Mapping facial landmarks, skin undertones &amp; beauty profile
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700 space-y-2">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <span>Analysis could not be completed</span>
+          </div>
+          <p className="text-xs text-red-600 pl-7">{error}</p>
+          <div className="pl-7 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                inFlightAnalysisPromise = null;
+                inFlightAnalysisImage = null;
+                navigate('/capture');
+              }}
+              className="rounded-xl bg-[#B92F60] px-4 py-2 text-xs font-semibold text-white hover:bg-[#A02350] transition-colors"
+            >
+              Try Another Photo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Processing Box */}
+      <div className="p-6 sm:p-10 rounded-3xl bg-white border border-[#F8DCE5] shadow-xs grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+        {/* Left: Circular Progress Ring with Wireframe Face */}
+        <div className="md:col-span-6 flex flex-col items-center justify-center space-y-4">
+          <div className="relative w-44 h-44 flex items-center justify-center">
+            {/* SVG Circle Progress Ring */}
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                stroke="#FFF1F5"
+                strokeWidth="6"
+                fill="none"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                stroke="url(#roseGrad)"
+                strokeWidth="6"
+                fill="none"
+                strokeDasharray="264"
+                strokeDashoffset={264 - (264 * progress) / 100}
+                strokeLinecap="round"
+                className="transition-all duration-300 ease-out"
+              />
+              <defs>
+                <linearGradient id="roseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#B92F60" />
+                  <stop offset="100%" stopColor="#C94D78" />
+                </linearGradient>
+              </defs>
+            </svg>
+
+            {/* Inner Face Graphic */}
+            <div className="absolute flex flex-col items-center justify-center text-center">
+              <div className="w-14 h-14 rounded-full bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-center text-[#B92F60] mb-1">
+                <ScanFace className="w-8 h-8 animate-pulse" />
+              </div>
+              <span className="text-xl font-bold text-[#30232A] leading-none">{progress}%</span>
+              <span className="text-[10px] font-semibold text-[#B92F60]">
+                {isFinished ? 'Complete!' : 'Processing...'}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#30232A]/60 font-medium">
+            AI Facial Feature Extraction in Progress
+          </p>
+        </div>
+
+        {/* Right: Step by Step Checklist */}
+        <div className="md:col-span-6 space-y-4">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[#B92F60]">
+            Analyzing Key Facial Metrics:
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">1. Face Detection &amp; Alignment</span>
+              {currentStep >= 1 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">2. Skin Tone &amp; Undertone</span>
+              {currentStep >= 2 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">3. Skin Type Estimation (EfficientNetB0)</span>
+              {currentStep >= 3 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">4. Face Structure &amp; Geometry</span>
+              {currentStep >= 4 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">5. Generating Custom Palette</span>
+              {currentStep >= 5 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom note */}
+      <div className="text-center text-xs text-[#30232A]/60 flex items-center justify-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5 text-[#B92F60]" />
+        <span>Curating beauty profile tailored to your unique features...</span>
+      </div>
+    </div>
+  );
+}

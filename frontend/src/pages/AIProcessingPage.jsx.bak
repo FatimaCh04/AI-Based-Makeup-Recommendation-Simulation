@@ -1,0 +1,251 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, CheckCircle2, Loader2, Sparkles, ScanFace } from 'lucide-react';
+import { analysisService } from '../services/analysisService';
+
+export default function AIProcessingPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [progress, setProgress] = useState(15);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [error, setError] = useState('');
+  const [isFinished, setIsFinished] = useState(false);
+
+  const capturedImage = location.state?.capturedImage ||
+    sessionStorage.getItem('glamai_guest_image') ||
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80";
+  const selectedEvent = location.state?.selectedEvent || { name: 'Party', id: 'party' };
+
+  useEffect(() => {
+    let cancelled = false;
+    let progressTimer;
+
+    const runRealAnalysis = async () => {
+      setError('');
+      setIsFinished(false);
+
+      try {
+        if (!capturedImage.startsWith('data:image/')) {
+          throw new Error('Please upload or capture a valid photo.');
+        }
+
+        sessionStorage.setItem('glamai_guest_image', capturedImage);
+        sessionStorage.setItem(
+          'glamai_guest_occasion',
+          selectedEvent.name || 'Party'
+        );
+
+        progressTimer = setInterval(() => {
+          if (cancelled) return;
+
+          setProgress(prev => Math.min(prev + 5, 90));
+        }, 500);
+
+        const response = await fetch(capturedImage);
+        const blob = await response.blob();
+
+        const imageFile = new File(
+          [blob],
+          'makeup-analysis.jpg',
+          { type: blob.type || 'image/jpeg' }
+        );
+
+        const result = await analysisService.analyzePhoto(imageFile);
+        const analysisData = result.analysis || result;
+
+        if (!analysisData?.face_detected) {
+          throw new Error(
+            'No clear face detected. Please upload a front-facing photo.'
+          );
+        }
+
+        if (cancelled) return;
+
+        clearInterval(progressTimer);
+
+        sessionStorage.setItem(
+          'glamai_guest_analysis',
+          JSON.stringify(analysisData)
+        );
+
+        setProgress(100);
+        setCurrentStep(5);
+        setIsFinished(true);
+
+        navigate('/guest/results', {
+          state: {
+            capturedImage,
+            selectedEvent
+          }
+        });
+
+      } catch (err) {
+        if (cancelled) return;
+
+        clearInterval(progressTimer);
+
+        console.error('AI analysis failed:', err);
+
+        setError(
+          err?.response?.data?.error ||
+          err?.message ||
+          'AI analysis failed. Please try again.'
+        );
+      }
+    };
+
+    runRealAnalysis();
+
+    return () => {
+      cancelled = true;
+      clearInterval(progressTimer);
+    };
+  }, []);
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 pb-12 font-sans text-[#30232A]">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => navigate('/capture')}
+          className="p-2.5 rounded-2xl bg-white border border-[#F8DCE5] text-[#30232A] hover:bg-[#FFF1F5] hover:text-[#B92F60] transition-colors shadow-2xs"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div>
+          <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#30232A]">
+            Analyzing Your Face...
+          </h1>
+          <p className="text-xs text-[#30232A]/60">
+            Mapping facial landmarks, skin undertones &amp; beauty profile
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <p className="font-semibold">Analysis could not be completed</p>
+          <p className="mt-1">{error}</p>
+          <button
+            type="button"
+            onClick={() => navigate('/capture')}
+            className="mt-3 rounded-xl bg-[#B92F60] px-4 py-2 text-xs font-semibold text-white"
+          >
+            Try Another Photo
+          </button>
+        </div>
+      )}
+
+      {/* Main Processing Box */}
+      <div className="p-6 sm:p-10 rounded-3xl bg-white border border-[#F8DCE5] shadow-xs grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+        {/* Left: Circular Progress Ring with Wireframe Face */}
+        <div className="md:col-span-6 flex flex-col items-center justify-center space-y-4">
+          <div className="relative w-44 h-44 flex items-center justify-center">
+            {/* SVG Circle Progress Ring */}
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                stroke="#FFF1F5"
+                strokeWidth="6"
+                fill="none"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                stroke="url(#roseGrad)"
+                strokeWidth="6"
+                fill="none"
+                strokeDasharray="264"
+                strokeDashoffset={264 - (264 * progress) / 100}
+                strokeLinecap="round"
+                className="transition-all duration-300 ease-out"
+              />
+              <defs>
+                <linearGradient id="roseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#B92F60" />
+                  <stop offset="100%" stopColor="#C94D78" />
+                </linearGradient>
+              </defs>
+            </svg>
+
+            {/* Inner Face Graphic */}
+            <div className="absolute flex flex-col items-center justify-center text-center">
+              <div className="w-14 h-14 rounded-full bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-center text-[#B92F60] mb-1">
+                <ScanFace className="w-8 h-8 animate-pulse" />
+              </div>
+              <span className="text-xl font-bold text-[#30232A] leading-none">{progress}%</span>
+              <span className="text-[10px] font-semibold text-[#B92F60]">Processing...</span>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#30232A]/60 font-medium">
+            AI Facial Feature Extraction in Progress
+          </p>
+        </div>
+
+        {/* Right: Step by Step Checklist */}
+        <div className="md:col-span-6 space-y-4">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[#B92F60]">
+            Analyzing Key Facial Metrics:
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">1. Face Detection &amp; Alignment</span>
+              {currentStep >= 1 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">2. Skin Tone &amp; Undertone</span>
+              {currentStep >= 2 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">3. Skin Type Estimation</span>
+              {currentStep >= 3 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">4. Face Structure &amp; Eye Shape</span>
+              {currentStep >= 4 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#FFF1F5] border border-[#F8DCE5] flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#30232A]">5. Generating Custom Palette</span>
+              {currentStep >= 5 ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Loader2 className="w-4 h-4 text-[#B92F60] animate-spin" />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom note */}
+      <div className="text-center text-xs text-[#30232A]/60 flex items-center justify-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5 text-[#B92F60]" />
+        <span>Curating beauty profile tailored to your unique features...</span>
+      </div>
+    </div>
+  );
+}

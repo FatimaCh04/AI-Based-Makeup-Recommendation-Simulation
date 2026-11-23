@@ -1,0 +1,341 @@
+"""
+Makeup Recommender Service for AI GLAM
+Generates personalized makeup palettes based on facial analysis (skin tone, undertone, face shape),
+selected event (Wedding, Party, Casual / Daily Wear, Office), and time of day (Day or Night).
+"""
+
+
+class MakeupRecommender:
+    def __init__(self):
+        self.occasions = ["Wedding", "Party", "Casual", "Office"]
+        self._build_shade_tables()
+        self._build_skin_type_rules()
+        self._build_face_shape_advice()
+
+    def _build_skin_type_rules(self):
+        """
+        Skin-type rules define foundation finish, prep, application, and setting guidance.
+        Supports Dry, Normal, Oily, and Combination.
+        Combination skin is handled via a documented dual-zone balancing strategy
+        (targeting T-zone oiliness while preserving cheek hydration).
+        """
+        self.skin_type_rules = {
+            "Dry": {
+                "day_finish": "Hydrating Dewy Glow",
+                "night_finish": "Rich Luminous Hydration",
+                "prep": "Prep skin with a hydrating hyaluronic acid serum and rich emollient moisturizer. Avoid astringent or alcohol-based toners.",
+                "application": "Use a damp beauty sponge to gently press hydrating foundation into skin without dragging or disturbing dry zones.",
+                "setting": "Lock in with a dewy, glycerin-based fixing mist. Avoid heavy powder; lightly dust micro-fine powder only under eyes if needed."
+            },
+            "Normal": {
+                "day_finish": "Satin Natural Radiant",
+                "night_finish": "Luminous Velvet",
+                "prep": "Prep with a lightweight balanced daily moisturizer and illuminating skin-smoothing primer.",
+                "application": "Apply satin liquid foundation using a buffing brush or sponge for seamless, buildable natural coverage.",
+                "setting": "Dust a fine veil of translucent powder over the center of the face and set with a refreshing facial mist."
+            },
+            "Oily": {
+                "day_finish": "Velvet Matte (Oil-Control)",
+                "night_finish": "Long-Wear Soft Matte",
+                "prep": "Cleanse thoroughly and apply an oil-free water-gel moisturizer followed by a pore-refining mattifying primer.",
+                "application": "Buff long-wear oil-control foundation using a dense synthetic foundation brush to blur pores and achieve an even matte canvas.",
+                "setting": "Press oil-absorbing translucent powder firmly onto oily areas (T-zone) and lock down with an oil-control matte fixing spray."
+            },
+            "Combination": {
+                "day_finish": "Dual-Action Balanced Satin (T-Zone Matte & Cheek Hydration)",
+                "night_finish": "Luminous Velvet (Targeted Oil-Control)",
+                "prep": "Dual-zone prep: Apply mattifying oil-control primer exclusively to the T-zone (forehead, nose, chin) and a hydrating moisturizer to the cheeks.",
+                "application": "Apply a flexible buildable satin foundation evenly; stipple over the T-zone and gently sweep across drier cheek areas.",
+                "setting": "Targeted setting: Dust translucent powder solely onto the T-zone to prevent shine while letting natural cheek radiance shine through."
+            }
+        }
+
+    def _build_face_shape_advice(self):
+        """
+        Face-shape contouring and blush placement guidance.
+        """
+        self.face_shape_advice = {
+            "Round": "Contour along the temples and diagonally beneath the cheekbones toward mouth corners to add structural definition. Sweep blush slightly upward toward the temples.",
+            "Oval": "Apply soft contour along natural cheek hollows. Apply blush directly to the apples of the cheeks and blend outward for harmonious balance.",
+            "Square": "Contour outer temple edges and soften the jawline angles with gentle shading. Apply blush in soft circular motions to soften cheek angles.",
+            "Heart": "Contour sides of the forehead and the tip of the chin to soften width. Apply blush slightly lower on the apples of cheeks to draw focal harmony inward.",
+            "Oblong": "Apply horizontal contour across the upper forehead hairline and bottom of the chin to visually balance length. Sweep blush horizontally outward."
+        }
+
+    def _build_shade_tables(self):
+        # Foundation shades by skin tone
+        self.foundation_shades = {
+            "Fair": {"name": "Porcelain Silk", "hex": "#F5DEB3", "finish": "Dewy Luminous"},
+            "Light": {"name": "Vanilla Cream", "hex": "#EFCFAB", "finish": "Satin Natural"},
+            "Medium": {"name": "Warm Honey", "hex": "#D8A782", "finish": "Satin Radiant"},
+            "Tan": {"name": "Golden Caramel", "hex": "#C49164", "finish": "Matte Velvet"},
+            "Deep": {"name": "Espresso Bronze", "hex": "#8B6340", "finish": "Luminous Matte"},
+            "Rich": {"name": "Mahogany Glow", "hex": "#5C3A21", "finish": "Radiant Matte"}
+        }
+
+        # Lipstick shades: skin_tone -> undertone -> occasion
+        self.lipstick_shades = {
+            "Fair": {
+                "Warm": {
+                    "Wedding": {"name": "Petal Pink", "hex": "#E8A0BF"},
+                    "Party": {"name": "Coral Kiss", "hex": "#E76F7A"},
+                    "Casual": {"name": "Nude Peach", "hex": "#DEAA96"},
+                    "Office": {"name": "Rose Whisper", "hex": "#D4A0A0"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Mauve Bliss", "hex": "#C98BB9"},
+                    "Party": {"name": "Berry Frost", "hex": "#A4506B"},
+                    "Casual": {"name": "Pink Nude", "hex": "#D4A6B3"},
+                    "Office": {"name": "Dusty Rose", "hex": "#C49BA5"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Soft Rose", "hex": "#D9909E"},
+                    "Party": {"name": "Rosewood", "hex": "#B85C6E"},
+                    "Casual": {"name": "Peach Rose", "hex": "#CFA098"},
+                    "Office": {"name": "Blush Nude", "hex": "#C8A09A"}
+                }
+            },
+            "Light": {
+                "Warm": {
+                    "Wedding": {"name": "Rose Gold", "hex": "#D4848F"},
+                    "Party": {"name": "Warm Berry", "hex": "#A8445A"},
+                    "Casual": {"name": "Peachy Keen", "hex": "#E09E7A"},
+                    "Office": {"name": "Terracotta Nude", "hex": "#C08070"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Plum Satin", "hex": "#8E4470"},
+                    "Party": {"name": "Raspberry Wine", "hex": "#832950"},
+                    "Casual": {"name": "Rose Quartz", "hex": "#C9A0AA"},
+                    "Office": {"name": "Mauve Mist", "hex": "#B08090"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Vintage Rose", "hex": "#B86D7E"},
+                    "Party": {"name": "Cranberry", "hex": "#8B2252"},
+                    "Casual": {"name": "Warm Nude", "hex": "#C09888"},
+                    "Office": {"name": "Rose Taupe", "hex": "#A88080"}
+                }
+            },
+            "Medium": {
+                "Warm": {
+                    "Wedding": {"name": "Velvet Crimson", "hex": "#8B263E"},
+                    "Party": {"name": "Spiced Wine", "hex": "#7B2D3A"},
+                    "Casual": {"name": "Cinnamon Rose", "hex": "#BC6C7B"},
+                    "Office": {"name": "Warm Rosewood", "hex": "#A05050"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Plum Velvet", "hex": "#6B2D5B"},
+                    "Party": {"name": "Deep Berry", "hex": "#7A2848"},
+                    "Casual": {"name": "Mauve Rose", "hex": "#A06878"},
+                    "Office": {"name": "Muted Plum", "hex": "#806070"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Classic Red", "hex": "#A83232"},
+                    "Party": {"name": "Berry Crush", "hex": "#8B3050"},
+                    "Casual": {"name": "Rose Nude", "hex": "#B07878"},
+                    "Office": {"name": "Dusty Mauve", "hex": "#907070"}
+                }
+            },
+            "Tan": {
+                "Warm": {
+                    "Wedding": {"name": "Burnt Sienna", "hex": "#8A3D2F"},
+                    "Party": {"name": "Ruby Red", "hex": "#9B1B30"},
+                    "Casual": {"name": "Terracotta", "hex": "#B45B3E"},
+                    "Office": {"name": "Warm Brick", "hex": "#905040"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Deep Plum", "hex": "#5C2058"},
+                    "Party": {"name": "Burgundy Luxe", "hex": "#6D2044"},
+                    "Casual": {"name": "Berry Nude", "hex": "#8A5868"},
+                    "Office": {"name": "Wine Rose", "hex": "#784858"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Mahogany Red", "hex": "#7A2828"},
+                    "Party": {"name": "Deep Cherry", "hex": "#6B1838"},
+                    "Casual": {"name": "Cocoa Rose", "hex": "#906060"},
+                    "Office": {"name": "Muted Berry", "hex": "#785060"}
+                }
+            },
+            "Deep": {
+                "Warm": {
+                    "Wedding": {"name": "Oxblood", "hex": "#6A1B2A"},
+                    "Party": {"name": "Electric Red", "hex": "#C41E3A"},
+                    "Casual": {"name": "Warm Cocoa", "hex": "#8B5A4B"},
+                    "Office": {"name": "Chestnut", "hex": "#704030"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Deep Wine", "hex": "#4A1028"},
+                    "Party": {"name": "Violet Berry", "hex": "#5B1A50"},
+                    "Casual": {"name": "Mocha Plum", "hex": "#6B4058"},
+                    "Office": {"name": "Dark Mauve", "hex": "#5A3848"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Dark Cherry", "hex": "#5A1520"},
+                    "Party": {"name": "Bold Crimson", "hex": "#8B0020"},
+                    "Casual": {"name": "Chocolate Rose", "hex": "#6A4040"},
+                    "Office": {"name": "Espresso Nude", "hex": "#5A3838"}
+                }
+            },
+            "Rich": {
+                "Warm": {
+                    "Wedding": {"name": "Deep Mahogany", "hex": "#4E1A1A"},
+                    "Party": {"name": "Fire Engine Red", "hex": "#B22222"},
+                    "Casual": {"name": "Rich Cocoa", "hex": "#5C3520"},
+                    "Office": {"name": "Dark Cinnamon", "hex": "#4A2820"}
+                },
+                "Cool": {
+                    "Wedding": {"name": "Midnight Plum", "hex": "#3C0A38"},
+                    "Party": {"name": "Violet Luxe", "hex": "#4B0E50"},
+                    "Casual": {"name": "Dark Berry", "hex": "#4A2838"},
+                    "Office": {"name": "Aubergine", "hex": "#3E2030"}
+                },
+                "Neutral": {
+                    "Wedding": {"name": "Deepest Red", "hex": "#4A0E0E"},
+                    "Party": {"name": "Bold Burgundy", "hex": "#6B0020"},
+                    "Casual": {"name": "Nude Espresso", "hex": "#4A3030"},
+                    "Office": {"name": "Mocha Matte", "hex": "#3E2828"}
+                }
+            }
+        }
+
+        # Eyeshadow shades: undertone -> occasion
+        self.eyeshadow_shades = {
+            "Warm": {
+                "Wedding": {"name": "Gilded Copper", "hex": "#A46638"},
+                "Party": {"name": "Smoky Bronze", "hex": "#8F5E43"},
+                "Casual": {"name": "Soft Taupe", "hex": "#967A6B"},
+                "Office": {"name": "Warm Beige", "hex": "#C4A882"}
+            },
+            "Cool": {
+                "Wedding": {"name": "Silver Frost", "hex": "#8890A0"},
+                "Party": {"name": "Smoky Charcoal", "hex": "#505060"},
+                "Casual": {"name": "Lavender Mist", "hex": "#9890A8"},
+                "Office": {"name": "Cool Taupe", "hex": "#8A8090"}
+            },
+            "Neutral": {
+                "Wedding": {"name": "Champagne Gold", "hex": "#C8A870"},
+                "Party": {"name": "Smoky Plum", "hex": "#6A5060"},
+                "Casual": {"name": "Soft Brown", "hex": "#8A7060"},
+                "Office": {"name": "Natural Taupe", "hex": "#A09080"}
+            }
+        }
+
+        # Blush shades: undertone -> occasion
+        self.blush_shades = {
+            "Warm": {
+                "Wedding": {"name": "Sunlit Terracotta", "hex": "#D37D64"},
+                "Party": {"name": "Coral Glow", "hex": "#E0876A"},
+                "Casual": {"name": "Warm Peach", "hex": "#E6917A"},
+                "Office": {"name": "Soft Apricot", "hex": "#E8A88A"}
+            },
+            "Cool": {
+                "Wedding": {"name": "Rosy Flush", "hex": "#D87080"},
+                "Party": {"name": "Berry Pink", "hex": "#C06078"},
+                "Casual": {"name": "Soft Mauve", "hex": "#C08898"},
+                "Office": {"name": "Dusty Pink", "hex": "#C8A0A8"}
+            },
+            "Neutral": {
+                "Wedding": {"name": "Rose Petal", "hex": "#D88088"},
+                "Party": {"name": "Warm Rose", "hex": "#C87080"},
+                "Casual": {"name": "Natural Flush", "hex": "#D09888"},
+                "Office": {"name": "Nude Pink", "hex": "#C8A098"}
+            }
+        }
+
+    def get_recommendations(self, analysis_results, occasion="Party", time_of_day="Day"):
+        """
+        Generate recommendations for all requested items:
+        Foundation, Lipstick, Eyeshadow, Blush, Eyeliner, Mascara, Highlighter.
+        Incorporates skin tone, undertone, face shape, and confirmed skin type.
+        """
+        skin_tone = analysis_results.get("skin_tone", "Medium")
+        undertone = analysis_results.get("undertone", "Warm")
+        face_shape = analysis_results.get("face_shape", "Oval")
+        skin_type = analysis_results.get("skin_type", "Normal")
+
+        # Normalize skin type and retrieve tailored guidance
+        norm_skin_type = skin_type.capitalize() if isinstance(skin_type, str) else "Normal"
+        if norm_skin_type not in self.skin_type_rules:
+            norm_skin_type = "Normal"
+
+        skin_rule = self.skin_type_rules[norm_skin_type]
+        face_contour = self.face_shape_advice.get(face_shape, self.face_shape_advice["Oval"])
+
+        # Normalize inputs
+        norm_occasion = "Casual" if "casual" in occasion.lower() else occasion.capitalize()
+        if norm_occasion not in self.occasions:
+            norm_occasion = "Party"
+
+        is_night = str(time_of_day).lower() == "night"
+
+        # 1. Foundation: Finish tailored directly to confirmed skin_type and time_of_day
+        foundation = self.foundation_shades.get(skin_tone, self.foundation_shades["Medium"]).copy()
+        foundation["category"] = "Foundation"
+        foundation["finish"] = skin_rule["night_finish"] if is_night else skin_rule["day_finish"]
+        foundation["skin_type_recommendation"] = f"Tailored for {norm_skin_type} skin"
+
+        # 2. Lipstick
+        lip_tone = self.lipstick_shades.get(skin_tone, self.lipstick_shades["Medium"])
+        lip_under = lip_tone.get(undertone, lip_tone.get("Neutral", {}))
+        lipstick = lip_under.get(norm_occasion, lip_under.get("Party", {})).copy()
+        lipstick["category"] = "Lipstick"
+        lipstick["finish"] = "Bold Satin" if is_night else "Velvet Cream"
+
+        # 3. Eyeshadow
+        eye_under = self.eyeshadow_shades.get(undertone, self.eyeshadow_shades["Neutral"])
+        eyeshadow = eye_under.get(norm_occasion, eye_under.get("Party", {})).copy()
+        eyeshadow["category"] = "Eyeshadow"
+        eyeshadow["finish"] = "Deep Shimmer + Crease" if is_night else "Soft Matte"
+
+        # 4. Blush
+        blush_under = self.blush_shades.get(undertone, self.blush_shades["Neutral"])
+        blush = blush_under.get(norm_occasion, blush_under.get("Party", {})).copy()
+        blush["category"] = "Blush"
+        blush["finish"] = "Radiant Luminous" if is_night else "Soft Matte"
+
+        # 5. Eyeliner
+        if is_night:
+            eyeliner = {"category": "Eyeliner", "name": "Precision Wing", "shade": "Kohl Onyx", "hex": "#1A1A1A"}
+        else:
+            eyeliner = {"category": "Eyeliner", "name": "Soft Line Definition", "shade": "Espresso Brown" if undertone == "Warm" else "Slate Charcoal", "hex": "#3E2B24" if undertone == "Warm" else "#2F353B"}
+
+        # 6. Mascara
+        if is_night:
+            mascara = {"category": "Mascara", "name": "Lash Drama Volumizing", "shade": "Jet Black", "hex": "#101010"}
+        else:
+            mascara = {"category": "Mascara", "name": "Featherlight Defined", "shade": "Deep Cocoa" if undertone == "Warm" else "Rich Black", "hex": "#251D19" if undertone == "Warm" else "#141414"}
+
+        # 7. Highlighter
+        if undertone == "Warm":
+            highlighter = {"category": "Highlighter", "name": "Gilded Candlelight" if is_night else "Sunlit Golden Peach", "shade": "Champagne Glow", "hex": "#EAD5A6" if is_night else "#F3E3C3"}
+        elif undertone == "Cool":
+            highlighter = {"category": "Highlighter", "name": "Moonlit Pearl" if is_night else "Starlight Pink Glow", "shade": "Opal Frost", "hex": "#EEDBE2" if is_night else "#F5EBF0"}
+        else:
+            highlighter = {"category": "Highlighter", "name": "Silk Rose Radiance", "shade": "Rose Gold Glow", "hex": "#ECC4B6"}
+
+        items = [foundation, lipstick, eyeshadow, blush, eyeliner, mascara, highlighter]
+
+        # Look title
+        display_event = "Casual / Daily Wear" if norm_occasion == "Casual" else norm_occasion
+        time_label = "Night" if is_night else "Day"
+        palette_title = f"{display_event} {time_label} Glow"
+
+        return {
+            "look_name": palette_title,
+            "occasion": display_event,
+            "time_of_day": time_label,
+            "skin_type": norm_skin_type,
+            "skin_type_handling": "dual_zone" if norm_skin_type == "Combination" else "standard",
+            "skin_guide": skin_rule,
+            "contour_guide": face_contour,
+            "description": f"Tailored {time_label.lower()} look for {skin_tone.lower()} skin, {undertone.lower()} undertones, {face_shape.lower()} facial structure, and {norm_skin_type.lower()} skin type.",
+            "shades": items,
+            "shade_map": {
+                "foundation": {"name": foundation.get("name", "Foundation"), "hex": foundation.get("hex", "#D8A782")},
+                "lipstick": {"name": lipstick.get("name", "Lipstick"), "hex": lipstick.get("hex", "#B92F60")},
+                "eyeshadow": {"name": eyeshadow.get("name", "Eyeshadow"), "hex": eyeshadow.get("hex", "#A46638")},
+                "blush": {"name": blush.get("name", "Blush"), "hex": blush.get("hex", "#D37D64")},
+                "eyeliner": {"name": eyeliner.get("shade", "Eyeliner"), "hex": eyeliner.get("hex", "#1A1A1A")},
+                "mascara": {"name": mascara.get("shade", "Mascara"), "hex": mascara.get("hex", "#101010")},
+                "highlighter": {"name": highlighter.get("shade", "Highlighter"), "hex": highlighter.get("hex", "#EAD5A6")}
+            }
+        }

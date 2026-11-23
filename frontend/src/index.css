@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* prevent horizontal overflow site-wide */
+    overflow-x: hidden;
+  }
+
+  body {
+    background-color: #FFF1F5;
+    color: #30232A;
+    font-family: 'Poppins', 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+    /* fluid base font: 14px on 320px → 16px on 1440px */
+    font-size: clamp(0.875rem, 0.8rem + 0.375vw, 1rem);
+  }
+
+  /* All images responsive by default */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Refined luxury scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #FFF1F5;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #F8DCE5;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #B92F60;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Prevent any child from causing horizontal scroll */
+  .no-scroll-x {
+    overflow-x: hidden;
+  }
+
+  /* Touch-friendly minimum target size */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Fluid heading helpers (used across pages) */
+  .heading-xl {
+    font-size: clamp(1.75rem, 4vw, 3.625rem);
+    line-height: 1.14;
+    letter-spacing: -0.02em;
+  }
+
+  .heading-lg {
+    font-size: clamp(1.375rem, 2.5vw, 2.5rem);
+    line-height: 1.2;
+  }
+
+  .heading-md {
+    font-size: clamp(1.125rem, 1.8vw, 1.5rem);
+    line-height: 1.3;
+  }
+}
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50%       { transform: translateY(-10px) rotate(1deg); }
+}
+
+@keyframes float-reverse-gentle {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50%       { transform: translateY(8px) rotate(-1deg); }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50%       { opacity: 0.75; transform: scale(1.08); }
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 10px 25px -5px rgba(185,47,96,0.25); }
+  50%       { box-shadow: 0 15px 35px -5px rgba(185,47,96,0.45); }
+}
+
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-float          { animation: float-gentle 6s ease-in-out infinite; }
+.animate-float-reverse  { animation: float-reverse-gentle 7s ease-in-out infinite; }
+.animate-pulse-slow     { animation: pulse-slow 7s ease-in-out infinite; }
+.animate-glow-pulse     { animation: glow-pulse 3s ease-in-out infinite; }
+.animate-slide-in-up    { animation: slide-in-up 0.25s ease-out both; }
+
+.shimmer-mask {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer-mask::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 50%; height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.25) 50%,
+    rgba(255,255,255,0) 100%
+  );
+  animation: shimmer 3s infinite;
+  pointer-events: none;
+}
+
+/* ── Responsive layout helpers ───────────────────────────────────────────── */
+
+/* Studio layout: sidebar + main content */
+.studio-main {
+  width: 100%;
+  min-width: 0; /* prevent flex children from overflowing */
+}
+
+/* Cards that must not overflow their grid cell */
+.card-safe {
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* Before/after slider container — always square-ish, never overflows */
+.slider-container {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  touch-action: none; /* hand scroll control to the slider JS */
+}
+
+/* Shade swatch grid — always wraps */
+.shade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+/* Full-width form inputs on mobile */
+@media (max-width: 640px) {
+  input, textarea, select {
+    font-size: 16px !important; /* prevent iOS zoom */
+  }
+
+  /* Collapsed hero text on very small screens */
+  .hero-headline {
+    font-size: clamp(1.6rem, 8vw, 3rem);
+  }
+
+  /* Single-column quick actions on mobile */
+  .dashboard-quick-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Full-width modal on mobile */
+  .modal-inner {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 1.5rem 1.5rem 0 0;
+    margin: 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+}
+
+/* Sidebar overlay z-index safety */
+.sidebar-backdrop {
+  z-index: 40;
+}
+.sidebar-panel {
+  z-index: 50;
+}

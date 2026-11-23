@@ -1,0 +1,188 @@
+"""
+Face Analyzer Service for GlamAI
+Real face detection and feature extraction using OpenCV + NumPy.
+Uses HSV skin detection to identify face regions and extract skin tone,
+undertone, face shape, and skin type from actual image data.
+"""
+
+import cv2
+import numpy as np
+from PIL import Image
+import io
+
+
+class FaceAnalyzer:
+    def __init__(self):
+        """Initialize the FaceAnalyzer with skin detection parameters."""
+        # HSV skin color range (primary)
+        self.lower_skin1 = np.array([0, 20, 70], dtype=np.uint8)
+        self.upper_skin1 = np.array([20, 255, 255], dtype=np.uint8)
+        # HSV skin color range (secondary - wraps around hue)
+        self.lower_skin2 = np.array([170, 20, 70], dtype=np.uint8)
+        self.upper_skin2 = np.array([180, 255, 255], dtype=np.uint8)
+        # Minimum skin ratio to consider a face detected
+        self.min_skin_ratio = 0.05
+        # Minimum contour area ratio relative to image
+        self.min_contour_ratio = 0.01
+        print("[GlamAI] FaceAnalyzer initialized with HSV skin detection")
+
+    def _get_skin_mask(self, img):
+        """Generate a binary skin mask from a BGR image using HSV thresholds."""
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask1 = cv2.inRange(hsv, self.lower_skin1, self.upper_skin1)
+        mask2 = cv2.inRange(hsv, self.lower_skin2, self.upper_skin2)
+        mask = cv2.bitwise_or(mask1, mask2)
+
+        # Apply morphological operations to clean up the mask
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        return mask
+
+    def _decode_image(self, image_bytes):
+        """Decode image bytes to a BGR numpy array."""
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        return img
+
+    def validate_face(self, image_bytes):
+        """
+        Check if a face is detected in the image using skin detection.
+        Returns dict: { detected: bool, message: str }
+        """
+        img = self._decode_image(image_bytes)
+        if img is None:
+            return {
+                "detected": False,
+                "message": "Could not read the image. Please upload a valid image file."
+            }
+
+        mask = self._get_skin_mask(img)
+        skin_ratio = np.sum(mask > 0) / mask.size
+
+        if skin_ratio < self.min_skin_ratio:
+            return {
+                "detected": False,
+                "message": "We couldn't detect a clear face. Please upload a front-facing photo with good lighting."
+            }
+
+        return {
+            "detected": True,
+            "message": "Face detected successfully"
+        }
+
+    def analyze(self, image_bytes):
+        """
+        Full analysis: face detection, skin tone, undertone, face shape, and skin type.
+        Processes the actual image data using OpenCV and NumPy.
+        Returns analysis dict or None if no face/skin detected.
+        """
+        img = self._decode_image(image_bytes)
+        if img is None:
+            return None
+
+        mask = self._get_skin_mask(img)
+        skin_ratio = np.sum(mask > 0) / mask.size
+
+        if skin_ratio < self.min_skin_ratio:
+            return None
+
+        # Find contours to locate the largest skin region (face)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return None
+
+        # Use the largest contour as the face region
+        largest = max(contours, key=cv2.contourArea)
+        min_area = img.shape[0] * img.shape[1] * self.min_contour_ratio
+        if cv2.contourArea(largest) < min_area:
+            return None
+
+        x, y, w, h = cv2.boundingRect(largest)
+
+        # Extract skin pixels from the face region
+        face_roi = img[y:y+h, x:x+w]
+        face_mask_roi = mask[y:y+h, x:x+w]
+        skin_pixels = face_roi[face_mask_roi > 0]
+
+        if len(skin_pixels) == 0:
+            return None
+
+        # ---- Skin Tone ----
+        avg_color = skin_pixels.mean(axis=0)  # BGR
+        b, g, r = int(avg_color[0]), int(avg_color[1]), int(avg_color[2])
+        skin_hex = f"#{r:02x}{g:02x}{b:02x}"
+
+        brightness = (r + g + b) / 3
+        if brightness > 200:
+            skin_tone = "Fair"
+        elif brightness > 170:
+            skin_tone = "Light"
+        elif brightness > 140:
+            skin_tone = "Medium"
+        elif brightness > 110:
+            skin_tone = "Tan"
+        elif brightness > 80:
+            skin_tone = "Deep"
+        else:
+            skin_tone = "Rich"
+
+        # ---- Undertone ----
+        if r > g and r > b:
+            undertone = "Warm"
+        elif b > r:
+            undertone = "Cool"
+        else:
+            undertone = "Neutral"
+
+        # ---- Face Shape ----
+        ratio = w / h if h > 0 else 1
+        if ratio > 0.85:
+            face_shape = "Round"
+        elif ratio > 0.75:
+            face_shape = "Square"
+        elif ratio > 0.65:
+            face_shape = "Oval"
+        elif ratio > 0.55:
+            face_shape = "Heart"
+        else:
+            face_shape = "Oblong"
+
+        # ---- Skin Type ----
+        brightness_vals = np.mean(skin_pixels.astype(np.float64), axis=1)
+        variance = float(np.var(brightness_vals))
+        if variance > 1000:
+            skin_type = "Combination"
+        elif variance > 500:
+            skin_type = "Oily"
+        elif brightness > 160:
+            skin_type = "Dry"
+        else:
+            skin_type = "Normal"
+
+        # ---- Confidence score based on skin ratio and contour size ----
+        contour_fill = cv2.contourArea(largest) / (img.shape[0] * img.shape[1])
+        confidence = min(0.99, round(0.70 + contour_fill * 0.5 + skin_ratio * 0.3, 2))
+
+        return {
+            "face_detected": True,
+            "skin_tone": skin_tone,
+            "skin_tone_hex": skin_hex,
+            "undertone": undertone,
+            "face_shape": face_shape,
+            "skin_type": skin_type,
+            "confidence": confidence,
+            "face_detection_heuristic_confidence": confidence,
+            "face_bounds": {
+                "x": int(x),
+                "y": int(y),
+                "w": int(w),
+                "h": int(h)
+            },
+            "image_size": {
+                "width": img.shape[1],
+                "height": img.shape[0]
+            }
+        }
