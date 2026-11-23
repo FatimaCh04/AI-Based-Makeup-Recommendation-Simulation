@@ -1,0 +1,8 @@
+# Exclude heavy test outputs and test suites from Vercel deployment
+backend/tests/qa_visual_outputs/
+backend/tests/
+backups/
+*.bak*
+*.bak
+*.whl
+tensorflow_download/
