@@ -6,12 +6,16 @@ backend/venv_mediapipe_test/
 tensorflow_download/
 *.whl
 
+# Test outputs
+backend/tests/qa_visual_outputs/
+
 # Build outputs
 frontend/dist/
 dist/
 
 # Backups
 backups/
+*.bak*
 
 # Python bytecode & cache
 __pycache__/
