@@ -33,6 +33,7 @@ export default function RegisterPage() {
 
   // OTP State
   const [otp, setOtp] = useState('');
+  const [devCode, setDevCode] = useState('');
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState('');
 
@@ -101,7 +102,10 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await sendOtp(name.trim(), email.trim().toLowerCase(), cleanedPhone, password);
+      const res = await sendOtp(name.trim(), email.trim().toLowerCase(), cleanedPhone, password);
+      if (res?.dev_code) {
+        setDevCode(res.dev_code);
+      }
       setStep(2);
     } catch (err) {
       const message = err.response?.data?.error || 'Failed to send verification code. Please try again.';
@@ -141,6 +145,9 @@ export default function RegisterPage() {
     setResending(true);
     try {
       const res = await apiClient.post('/auth/resend-otp', { email: email.trim().toLowerCase() });
+      if (res.data?.dev_code) {
+        setDevCode(res.data.dev_code);
+      }
       setResendSuccess(res.data.message || 'New verification code sent to your email!');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to resend code. Please try again.');
@@ -362,6 +369,22 @@ export default function RegisterPage() {
                   <div className="flex items-start gap-2.5 bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-xs text-emerald-700">
                     <Check className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-600" />
                     <span>{resendSuccess}</span>
+                  </div>
+                )}
+
+                {devCode && (
+                  <div className="flex items-center justify-between bg-pink-50/80 border border-[#B92F60]/20 rounded-2xl p-2.5 px-3.5 text-xs text-[#30232A]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#B92F60] font-semibold">Verification Code:</span>
+                      <span className="font-mono font-bold tracking-widest text-[#B92F60] text-sm bg-white px-2 py-0.5 rounded-lg border border-[#F8DCE5]">{devCode}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOtp(devCode)}
+                      className="text-xs font-bold text-[#B92F60] hover:text-[#C94D78] underline cursor-pointer"
+                    >
+                      Auto-Fill
+                    </button>
                   </div>
                 )}
 

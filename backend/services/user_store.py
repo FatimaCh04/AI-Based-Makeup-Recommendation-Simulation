@@ -11,6 +11,29 @@ import uuid
 from datetime import datetime
 import bcrypt
 
+try:
+    from services.supabase_service import (
+        is_supabase_configured,
+        sb_find_user_by_email,
+        sb_find_user_by_id,
+        sb_create_user,
+        sb_update_user,
+        sb_get_user_saved_looks,
+        sb_add_user_saved_look,
+        sb_update_user_saved_look,
+        sb_delete_user_saved_look
+    )
+except ImportError:
+    is_supabase_configured = lambda: False
+    sb_find_user_by_email = None
+    sb_find_user_by_id = None
+    sb_create_user = None
+    sb_update_user = None
+    sb_get_user_saved_looks = None
+    sb_add_user_saved_look = None
+    sb_update_user_saved_look = None
+    sb_delete_user_saved_look = None
+
 # Determine data storage path (serverless-aware: Vercel / Lambda filesystems are read-only except /tmp)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE_USERS_FILE = os.path.join(BASE_DIR, 'data', 'users.json')
@@ -67,6 +90,11 @@ def save_users(users):
 
 def find_user_by_email(email):
     """Find a user by their email address. Returns user dict or None."""
+    if is_supabase_configured() and sb_find_user_by_email:
+        sb_user = sb_find_user_by_email(email)
+        if sb_user:
+            return sb_user
+
     users = load_users()
     for user in users:
         if user.get('email', '').lower() == email.lower():
@@ -76,6 +104,11 @@ def find_user_by_email(email):
 
 def find_user_by_id(user_id):
     """Find a user by their ID. Returns user dict or None."""
+    if is_supabase_configured() and sb_find_user_by_id:
+        sb_user = sb_find_user_by_id(user_id)
+        if sb_user:
+            return sb_user
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:
@@ -88,11 +121,15 @@ def create_user(name, email, password, phone=""):
     Create a new user with bcrypt-hashed password and phone.
     Returns the created user dict (without password_hash).
     """
-    users = load_users()
-
     # Hash the password
     password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
+    if is_supabase_configured() and sb_create_user:
+        sb_user = sb_create_user(name, email, password_hash, phone)
+        if sb_user:
+            return get_safe_user(sb_user)
+
+    users = load_users()
     new_user = {
         "id": str(uuid.uuid4()),
         "name": name,
@@ -137,6 +174,11 @@ def get_safe_user(user):
 
 def update_user_beauty_profile(user_id, beauty_profile):
     """Update beauty profile for a specific user."""
+    if is_supabase_configured() and sb_update_user:
+        res = sb_update_user(user_id, {"beauty_profile": beauty_profile})
+        if res:
+            return True
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:
@@ -148,6 +190,16 @@ def update_user_beauty_profile(user_id, beauty_profile):
 
 def update_user_info(user_id, data):
     """Update user information like name, phone, preferences."""
+    if is_supabase_configured() and sb_update_user:
+        fields = {}
+        for k in ("name", "phone", "notifications", "theme", "avatar"):
+            if k in data:
+                fields[k] = data[k]
+        if fields:
+            sb_user = sb_update_user(user_id, fields)
+            if sb_user:
+                return get_safe_user(sb_user)
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:
@@ -168,35 +220,53 @@ def update_user_info(user_id, data):
 
 def change_user_password(user_id, current_password, new_password):
     """Verify current password and set new password."""
+    user = find_user_by_id(user_id)
+    if not user:
+        return False, "User not found"
+
+    stored_hash = user.get('password_hash', '')
+    if not verify_password(stored_hash, current_password):
+        return False, "Current password does not match"
+    if len(new_password) < 6:
+        return False, "New password must be at least 6 characters"
+    new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    if is_supabase_configured() and sb_update_user:
+        sb_update_user(user_id, {"password_hash": new_hash})
+
     users = load_users()
-    for user in users:
-        if user.get('id') == user_id:
-            stored_hash = user.get('password_hash', '')
-            if not verify_password(stored_hash, current_password):
-                return False, "Current password does not match"
-            if len(new_password) < 6:
-                return False, "New password must be at least 6 characters"
-            new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            user['password_hash'] = new_hash
+    for u in users:
+        if u.get('id') == user_id:
+            u['password_hash'] = new_hash
             save_users(users)
-            return True, "Password updated successfully"
-    return False, "User not found"
+            break
+    return True, "Password updated successfully"
 
 
 def reset_user_password(email, new_password):
     """Reset password for a user identified by email address."""
+    user = find_user_by_email(email)
+    if not user:
+        return False, "User not found"
+
+    new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    if is_supabase_configured() and sb_update_user and user.get("id"):
+        sb_update_user(user["id"], {"password_hash": new_hash})
+
     users = load_users()
-    for user in users:
-        if user.get('email', '').lower() == email.lower():
-            new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            user['password_hash'] = new_hash
+    for u in users:
+        if u.get('email', '').lower() == email.lower():
+            u['password_hash'] = new_hash
             save_users(users)
             return True, "Password has been successfully reset"
-    return False, "User not found"
+    return True, "Password has been successfully reset"
 
 
 def get_user_saved_looks(user_id):
     """Get all saved looks for a user."""
+    if is_supabase_configured() and sb_get_user_saved_looks:
+        return sb_get_user_saved_looks(user_id)
     user = find_user_by_id(user_id)
     if user:
         return user.get('saved_looks', [])
@@ -205,6 +275,11 @@ def get_user_saved_looks(user_id):
 
 def add_user_saved_look(user_id, look_data):
     """Add a new saved look for a user."""
+    if is_supabase_configured() and sb_add_user_saved_look:
+        res = sb_add_user_saved_look(user_id, look_data)
+        if res:
+            return res
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:
@@ -233,6 +308,11 @@ def add_user_saved_look(user_id, look_data):
 
 def update_user_saved_look(user_id, look_id, update_data):
     """Update fields on an existing saved look (e.g. thumbnail, shades)."""
+    if is_supabase_configured() and sb_update_user_saved_look:
+        res = sb_update_user_saved_look(user_id, look_id, update_data)
+        if res:
+            return res
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:
@@ -248,6 +328,9 @@ def update_user_saved_look(user_id, look_id, update_data):
 
 def delete_user_saved_look(user_id, look_id):
     """Delete a saved look by its ID for a specific user."""
+    if is_supabase_configured() and sb_delete_user_saved_look:
+        return sb_delete_user_saved_look(user_id, look_id)
+
     users = load_users()
     for user in users:
         if user.get('id') == user_id:

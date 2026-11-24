@@ -19,8 +19,42 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "alizanaeem37@gmail.com")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "pmsylaugyrknavrx").replace(" ", "")
 
 
+IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
+
+
+def _send_smtp_message(msg, to_email):
+    """
+    Robust SMTP sender:
+    1. First tries direct SSL on port 465 (fastest).
+    2. If that fails or times out, falls back to STARTTLS on port 587.
+    """
+    # 1. Try SSL port 465
+    try:
+        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=8)
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, [to_email], msg.as_string())
+        server.quit()
+        print(f" [AI GLAM] Email delivered via SSL port {SMTP_PORT} to {to_email}", flush=True)
+        return True, "Verification code sent to your email address."
+    except Exception as e_ssl:
+        print(f" [AI GLAM] SSL port {SMTP_PORT} failed ({e_ssl}), trying port 587 STARTTLS...", flush=True)
+
+    # 2. Fallback to STARTTLS port 587
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, 587, timeout=8)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.sendmail(SMTP_EMAIL, [to_email], msg.as_string())
+        server.quit()
+        print(f" [AI GLAM] Email delivered via STARTTLS port 587 to {to_email}", flush=True)
+        return True, "Verification code sent to your email address."
+    except Exception as e_tls:
+        print(f" [AI GLAM ERROR] Both port 465 and 587 failed: {e_tls}", flush=True)
+        return False, f"Could not connect to SMTP server: {str(e_tls)}"
+
+
 def _send_mail_worker(to_email, otp_code, user_name):
-    """Internal worker that connects to Gmail via SSL and sends the email."""
+    """Internal worker that constructs and sends the OTP verification email."""
     subject = f"{otp_code} is your AI GLAM Verification Code"
 
     html_body = f"""
@@ -100,29 +134,24 @@ def _send_mail_worker(to_email, otp_code, user_name):
     msg.attach(MIMEText(f"Your AI GLAM verification code is: {otp_code}\n\nThis code will expire in 10 minutes.", "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    try:
-        # Use direct SSL on port 465 for fastest connection
-        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=12)
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.sendmail(SMTP_EMAIL, [to_email], msg.as_string())
-        server.quit()
-        print(f" [AI GLAM OTP] Email successfully delivered to {to_email}", flush=True)
-        return True, "Verification code sent to your email address."
-    except Exception as e:
-        print(f" [AI GLAM OTP WARNING] Gmail SMTP error: {e}", flush=True)
-        return False, f"Could not connect to SMTP server: {str(e)}"
+    return _send_smtp_message(msg, to_email)
 
 
-def send_otp_email(to_email, otp_code, user_name="Beauty Enthusiast", run_in_background=True):
+def send_otp_email(to_email, otp_code, user_name="Beauty Enthusiast", run_in_background=None):
     """
     Send OTP verification email.
-    If run_in_background=True (default), sends in a background thread so the user's
-    browser UI responds instantaneously without waiting for network latency.
+    On serverless (Vercel), always runs synchronously so Lambda does not freeze before completion.
+    On traditional server, background thread can be used.
     """
     print(f"\n=======================================================", flush=True)
     print(f" [AI GLAM OTP] Email: {to_email}", flush=True)
     print(f" [AI GLAM OTP] 6-Digit Code: {otp_code}", flush=True)
     print(f"=======================================================\n", flush=True)
+
+    # In serverless environments, background threads get frozen when request ends.
+    # Therefore, run synchronously on Vercel.
+    if run_in_background is None:
+        run_in_background = not IS_SERVERLESS
 
     if run_in_background:
         thread = threading.Thread(
@@ -216,24 +245,18 @@ def _send_reset_mail_worker(to_email, otp_code, user_name):
     msg.attach(MIMEText(f"Your AI GLAM password reset code is: {otp_code}\n\nThis code expires in 10 minutes.", "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    try:
-        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=12)
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.sendmail(SMTP_EMAIL, [to_email], msg.as_string())
-        server.quit()
-        print(f" [AI GLAM RESET] Password reset email delivered to {to_email}", flush=True)
-        return True, "Reset code sent."
-    except Exception as e:
-        print(f" [AI GLAM RESET WARNING] SMTP error: {e}", flush=True)
-        return False, str(e)
+    return _send_smtp_message(msg, to_email)
 
 
-def send_password_reset_email(to_email, otp_code, user_name="Beauty Enthusiast", run_in_background=True):
-    """Send password reset OTP email in background."""
+def send_password_reset_email(to_email, otp_code, user_name="Beauty Enthusiast", run_in_background=None):
+    """Send password reset OTP email (synchronous on serverless)."""
     print(f"\n=======================================================", flush=True)
     print(f" [AI GLAM RESET] Email: {to_email}", flush=True)
     print(f" [AI GLAM RESET] 6-Digit Code: {otp_code}", flush=True)
     print(f"=======================================================\n", flush=True)
+
+    if run_in_background is None:
+        run_in_background = not IS_SERVERLESS
 
     if run_in_background:
         thread = threading.Thread(
