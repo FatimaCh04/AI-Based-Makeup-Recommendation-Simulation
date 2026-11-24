@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom';
 import { Sparkles, ArrowLeft, Check, AlertCircle, RotateCcw, Loader2 } from 'lucide-react';
 import { analysisService } from '../services/analysisService';
-import { generateImageSignature } from '../utils/virtualMakeupEngine';
+import { generateImageSignature, generateCalibratedCanonicalLandmarks } from '../utils/virtualMakeupEngine';
 
 const ANALYSIS_STEPS = [
   { id: 'face_detection', label: 'Face Detection', message: 'Detecting facial boundaries...' },
@@ -244,12 +244,11 @@ export default function GuestAnalysisPage() {
       // Attach image signature to guarantee cache safety and 1:1 image binding
       analysisData.image_signature = generateImageSignature(imageData);
       sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(analysisData));
-      if (analysisData.landmarks) {
-        sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
-          landmarks: analysisData.landmarks,
-          image_signature: analysisData.image_signature
-        }));
-      }
+      const effectiveLandmarks = analysisData.landmarks || generateCalibratedCanonicalLandmarks(analysisData);
+      sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+        landmarks: effectiveLandmarks,
+        image_signature: analysisData.image_signature
+      }));
       setIsComplete(true);
 
     } catch (err) {

@@ -51,7 +51,7 @@ export default function GuestTryOnPage() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       try {
-        const landmarks = getCachedLandmarks(currentAnalysis, srcUrl, 'auto');
+        const landmarks = getCachedLandmarks(currentAnalysis, srcUrl, 'auto', canvas.width, canvas.height);
 
         if (landmarks) {
           const faceShape = currentAnalysis?.face_shape || 'Oval';

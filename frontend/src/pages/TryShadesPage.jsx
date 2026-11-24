@@ -153,7 +153,7 @@ export default function TryShadesPage() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       try {
-        const landmarks = getCachedLandmarks(location.state?.analysis, userImage, 'auto');
+        const landmarks = getCachedLandmarks(location.state?.analysis, userImage, 'auto', canvas.width, canvas.height);
 
         if (landmarks) {
           const faceShape = location.state?.analysis?.face_shape || 'Oval';

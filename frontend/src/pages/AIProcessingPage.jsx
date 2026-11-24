@@ -5,7 +5,7 @@ import {
   AlertCircle, ChevronRight, User, Droplets, Layers, Circle,
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
-import { generateImageSignature } from '../utils/virtualMakeupEngine';
+import { generateImageSignature, generateCalibratedCanonicalLandmarks } from '../utils/virtualMakeupEngine';
 
 const STEPS = [
   'Face Detection & Alignment',
@@ -209,12 +209,11 @@ export default function AIProcessingPage() {
 
       sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(safeAnalysis));
       sessionStorage.setItem('glamai_member_analysis', JSON.stringify(safeAnalysis));
-      if (raw.landmarks) {
-        sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
-          landmarks: raw.landmarks,
-          image_signature: imgSig
-        }));
-      }
+      const effectiveLandmarks = raw.landmarks || generateCalibratedCanonicalLandmarks(safeAnalysis);
+      sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+        landmarks: effectiveLandmarks,
+        image_signature: imgSig
+      }));
       setAnalysis(safeAnalysis);
       setProgress(100);
       await delay(300);

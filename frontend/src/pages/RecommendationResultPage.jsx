@@ -132,7 +132,7 @@ export default function RecommendationResultPage() {
       ctx.drawImage(img, 0, 0, c.width, c.height);
 
       try {
-        const landmarks = getCachedLandmarks(analysis, capturedImage, 'auto');
+        const landmarks = getCachedLandmarks(analysis, capturedImage, 'auto', c.width, c.height);
 
         if (landmarks) {
           const faceShape = analysis?.face_shape || 'Oval';

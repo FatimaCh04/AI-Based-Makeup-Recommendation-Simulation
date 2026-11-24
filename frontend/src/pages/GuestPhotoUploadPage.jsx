@@ -163,8 +163,8 @@ export default function GuestPhotoUploadPage() {
 
           {/* Camera Mode */}
           {mode === 'camera' && (
-            <div className="bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
-              <div className="relative aspect-[4/3] bg-black rounded-t-3xl overflow-hidden">
+            <div className="max-w-md mx-auto bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
+              <div className="relative aspect-[4/3] max-h-[380px] bg-black rounded-t-3xl overflow-hidden">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -181,12 +181,12 @@ export default function GuestPhotoUploadPage() {
                     </div>
                   </div>
                 )}
-                <div className="absolute inset-8 border border-white/30 rounded-3xl pointer-events-none" />
+                <div className="absolute inset-6 border border-white/30 rounded-3xl pointer-events-none" />
               </div>
-              <div className="p-4 flex items-center justify-center gap-3 bg-[#FFF1F5]/40">
+              <div className="p-4 flex items-center justify-center gap-3 bg-[#FFF1F5]/40 border-t border-[#F8DCE5]/60">
                 <button
                   onClick={() => { stopCamera(); setMode(null); }}
-                  className="px-4 py-2 text-xs font-semibold text-[#30232A]/70 hover:text-[#30232A] border border-[#F8DCE5] bg-white rounded-xl transition-colors"
+                  className="px-4 py-2 text-xs font-semibold text-[#30232A]/70 hover:text-[#30232A] border border-[#F8DCE5] bg-white rounded-xl transition-colors shadow-2xs"
                 >
                   Cancel
                 </button>
@@ -204,27 +204,32 @@ export default function GuestPhotoUploadPage() {
 
           {/* Preview Mode */}
           {mode === 'preview' && preview && (
-            <div className="bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
-              <div className="relative aspect-[4/3] bg-[#FFF1F5] rounded-t-3xl overflow-hidden">
-                <img src={preview} alt="Your photo" className="w-full h-full object-cover" />
+            <div className="max-w-md mx-auto bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
+              <div className="relative bg-[#FFF1F5] flex items-center justify-center p-3 overflow-hidden min-h-[260px] max-h-[380px]">
+                <img
+                  src={preview}
+                  alt="Your photo"
+                  className="max-h-[350px] w-auto max-w-full rounded-2xl object-contain shadow-xs"
+                />
                 <button
                   onClick={handleRemoveImage}
-                  className="absolute top-3 right-3 w-7 h-7 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-xs transition-colors"
+                  className="absolute top-5 right-5 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-md transition-colors"
+                  title="Remove Photo"
                 >
-                  <X className="w-3.5 h-3.5 text-[#30232A]" />
+                  <X className="w-4 h-4 text-[#30232A]" />
                 </button>
               </div>
-              <div className="p-4 flex items-center justify-center gap-3 bg-[#FFF1F5]/40">
+              <div className="p-4 flex items-center justify-center gap-3 bg-[#FFF1F5]/40 border-t border-[#F8DCE5]/60">
                 <button
                   onClick={handleRemoveImage}
-                  className="px-4 py-2 text-xs font-semibold text-[#30232A]/70 hover:text-[#30232A] border border-[#F8DCE5] bg-white rounded-xl transition-colors flex items-center gap-1.5"
+                  className="px-4 py-2.5 text-xs font-semibold text-[#30232A]/70 hover:text-[#30232A] border border-[#F8DCE5] bg-white rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3.5 h-3.5" />
                   Change Photo
                 </button>
                 <button
                   onClick={handleContinue}
-                  className="px-5 py-2 text-xs font-semibold text-white bg-[#B92F60] hover:bg-[#C94D78] rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                  className="px-6 py-2.5 text-xs font-semibold text-white bg-[#B92F60] hover:bg-[#C94D78] rounded-xl shadow-xs transition-all flex items-center gap-1.5"
                 >
                   Continue
                   <ChevronRight className="w-3.5 h-3.5" />
