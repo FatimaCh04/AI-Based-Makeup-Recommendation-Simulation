@@ -5,7 +5,7 @@ import {
   AlertCircle, ChevronRight, User, Droplets, Layers, Circle,
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
-import { generateImageSignature, generateCalibratedCanonicalLandmarks } from '../utils/virtualMakeupEngine';
+import { generateImageSignature, generateCalibratedCanonicalLandmarks, detectRealLandmarksInBrowser } from '../utils/virtualMakeupEngine';
 
 const STEPS = [
   'Face Detection & Alignment',
@@ -93,7 +93,8 @@ function analyzeInBrowser(imageSrc) {
           face_shape: 'Oval',
           skin_type: skinType,
           confidence: 0.90,
-          face_bounds: { x: sx, y: sy, w: sw, h: sh },
+          skin_sample_bounds: { x: sx, y: sy, w: sw, h: sh },
+          face_bounds: null,
           image_size: { width: canvas.width, height: canvas.height }
         });
       };
@@ -209,7 +210,17 @@ export default function AIProcessingPage() {
 
       sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(safeAnalysis));
       sessionStorage.setItem('glamai_member_analysis', JSON.stringify(safeAnalysis));
-      const effectiveLandmarks = raw.landmarks || generateCalibratedCanonicalLandmarks(safeAnalysis);
+      let effectiveLandmarks = raw.landmarks;
+      if (!effectiveLandmarks) {
+        try {
+          effectiveLandmarks = await detectRealLandmarksInBrowser(capturedImage);
+        } catch (e) {
+          console.info('[AIProcessing] MediaPipe client detection fallback:', e);
+        }
+      }
+      if (!effectiveLandmarks) {
+        effectiveLandmarks = generateCalibratedCanonicalLandmarks(safeAnalysis);
+      }
       sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
         landmarks: effectiveLandmarks,
         image_signature: imgSig

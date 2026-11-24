@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom';
 import { Sparkles, ArrowLeft, Check, AlertCircle, RotateCcw, Loader2 } from 'lucide-react';
 import { analysisService } from '../services/analysisService';
-import { generateImageSignature, generateCalibratedCanonicalLandmarks } from '../utils/virtualMakeupEngine';
+import { generateImageSignature, generateCalibratedCanonicalLandmarks, detectRealLandmarksInBrowser } from '../utils/virtualMakeupEngine';
 
 const ANALYSIS_STEPS = [
   { id: 'face_detection', label: 'Face Detection', message: 'Detecting facial boundaries...' },
@@ -82,7 +82,8 @@ function analyzeInBrowser(imageSrc) {
           face_shape: 'Oval',
           skin_type: skinType,
           confidence: 0.90,
-          face_bounds: { x: sx, y: sy, w: sw, h: sh },
+          skin_sample_bounds: { x: sx, y: sy, w: sw, h: sh },
+          face_bounds: null,
           image_size: { width: canvas.width, height: canvas.height }
         });
       };
@@ -244,7 +245,17 @@ export default function GuestAnalysisPage() {
       // Attach image signature to guarantee cache safety and 1:1 image binding
       analysisData.image_signature = generateImageSignature(imageData);
       sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(analysisData));
-      const effectiveLandmarks = analysisData.landmarks || generateCalibratedCanonicalLandmarks(analysisData);
+      let effectiveLandmarks = analysisData.landmarks;
+      if (!effectiveLandmarks) {
+        try {
+          effectiveLandmarks = await detectRealLandmarksInBrowser(imageData);
+        } catch (e) {
+          console.info('[GuestAnalysis] MediaPipe client detection fallback:', e);
+        }
+      }
+      if (!effectiveLandmarks) {
+        effectiveLandmarks = generateCalibratedCanonicalLandmarks(analysisData);
+      }
       sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
         landmarks: effectiveLandmarks,
         image_signature: analysisData.image_signature

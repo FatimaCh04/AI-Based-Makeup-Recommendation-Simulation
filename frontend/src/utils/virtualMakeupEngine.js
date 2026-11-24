@@ -2298,6 +2298,82 @@ export function getCachedLandmarks(analysis, imageSrc = null, context = 'auto', 
 }
 
 /**
+ * Asynchronously detects real 478 MediaPipe face landmarks in the browser
+ * using client-side WebAssembly / JS FaceMesh if available.
+ * 
+ * @param {string|HTMLImageElement} imageSource 
+ * @returns {Promise<Array|null>}
+ */
+export async function detectRealLandmarksInBrowser(imageSource) {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    if (!window.FaceMesh) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+        s.crossOrigin = 'anonymous';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    if (!window.FaceMesh) return null;
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 3500);
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        try {
+          const fm = new window.FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+          });
+          fm.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+
+          fm.onResults((results) => {
+            clearTimeout(timeout);
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+              resolve(results.multiFaceLandmarks[0]);
+            } else {
+              resolve(null);
+            }
+          });
+
+          await fm.send({ image: img });
+        } catch (err) {
+          clearTimeout(timeout);
+          console.warn('[GlamAI] FaceMesh detection error:', err);
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        clearTimeout(timeout);
+        resolve(null);
+      };
+
+      if (typeof imageSource === 'string') {
+        img.src = imageSource;
+      } else if (imageSource?.src) {
+        img.src = imageSource.src;
+      } else {
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Generates calibrated MediaPipe-compatible 478 face landmarks based on
  * facial proportions and detected face bounds.
  * Ensures virtual makeup simulation (foundation, blush, highlighter, eyeshadow,
@@ -2309,11 +2385,11 @@ export function getCachedLandmarks(analysis, imageSrc = null, context = 'auto', 
  * @returns {Array<{x: number, y: number, z: number}>} 478-point normalized landmark array
  */
 export function generateCalibratedCanonicalLandmarks(analysis = null, canvasWidth = null, canvasHeight = null) {
-  // Determine normalized face bounding box
-  let boxX = 0.20;
-  let boxY = 0.12;
-  let boxW = 0.60;
-  let boxH = 0.76;
+  // Standard anthropometric portrait face bounds
+  let boxX = 0.18;
+  let boxY = 0.10;
+  let boxW = 0.64;
+  let boxH = 0.78;
 
   if (analysis && analysis.face_bounds) {
     const fb = analysis.face_bounds;
@@ -2321,220 +2397,220 @@ export function generateCalibratedCanonicalLandmarks(analysis = null, canvasWidt
     const iw = canvasWidth || imgSize.width || 480;
     const ih = canvasHeight || imgSize.height || 640;
 
-    // Check if bounds are normalized (0 to 1) or pixel values
-    if (fb.x <= 1 && fb.w <= 1 && fb.w > 0.05) {
-      boxX = fb.x;
-      boxY = fb.y;
-      boxW = fb.w;
-      boxH = fb.h;
-    } else if (fb.w > 10 && iw > 10) {
-      boxX = Math.max(0.05, Math.min(0.5, fb.x / iw));
-      boxY = Math.max(0.05, Math.min(0.5, fb.y / ih));
-      boxW = Math.max(0.2, Math.min(0.9, fb.w / iw));
-      boxH = Math.max(0.2, Math.min(0.9, fb.h / ih));
+    const normW = fb.w <= 1 ? fb.w : fb.w / iw;
+    const normH = fb.h <= 1 ? fb.h : fb.h / ih;
+    const normX = fb.x <= 1 ? fb.x : fb.x / iw;
+    const normY = fb.y <= 1 ? fb.y : fb.y / ih;
+
+    // Only accept genuine full face bounding boxes (reject small color sample boxes)
+    if (normW >= 0.45 && normH >= 0.50) {
+      boxX = normX;
+      boxY = normY;
+      boxW = normW;
+      boxH = normH;
     }
   }
 
   // Canonical landmark proportions (u, v) normalized to the face bounding box [0, 1] x [0, 1]
-  // Based on the standard anthropometric facial landmark model (MediaPipe Face Mesh)
+  // Calibrated to align with human facial anatomy and standard portrait photography
   const landmarkMap = {
     // Face Oval / Jawline / Hairline
-    10:  [0.50, 0.04], // Forehead top
-    338: [0.65, 0.08],
-    297: [0.72, 0.12],
-    332: [0.78, 0.18],
-    284: [0.84, 0.25],
-    251: [0.88, 0.35],
-    389: [0.91, 0.45],
-    356: [0.93, 0.53],
-    454: [0.94, 0.61], // Right zygion / cheekbone edge
-    323: [0.90, 0.69],
-    361: [0.86, 0.75],
-    288: [0.81, 0.81],
-    397: [0.75, 0.87],
-    365: [0.69, 0.92],
-    379: [0.64, 0.95],
-    378: [0.60, 0.97],
-    400: [0.56, 0.99],
-    377: [0.53, 1.00],
-    152: [0.50, 1.00], // Chin bottom
-    148: [0.47, 1.00],
-    176: [0.44, 0.99],
-    149: [0.40, 0.97],
-    150: [0.36, 0.95],
-    136: [0.31, 0.92],
-    172: [0.25, 0.87],
-    58:  [0.19, 0.81],
-    132: [0.14, 0.75],
-    93:  [0.10, 0.69],
-    234: [0.06, 0.61], // Left zygion / cheekbone edge
-    127: [0.07, 0.53],
-    162: [0.09, 0.45],
-    21:  [0.12, 0.35],
-    54:  [0.16, 0.25],
-    103: [0.22, 0.18],
-    67:  [0.28, 0.12],
-    109: [0.35, 0.08],
+    10:  [0.500, 0.040], // Forehead top
+    338: [0.650, 0.080],
+    297: [0.740, 0.125],
+    332: [0.810, 0.180],
+    284: [0.870, 0.250],
+    251: [0.910, 0.340],
+    389: [0.940, 0.430],
+    356: [0.955, 0.510],
+    454: [0.950, 0.590], // Right zygion / cheekbone edge
+    323: [0.915, 0.675],
+    361: [0.870, 0.745],
+    288: [0.815, 0.810],
+    397: [0.750, 0.870],
+    365: [0.680, 0.920],
+    379: [0.625, 0.950],
+    378: [0.580, 0.970],
+    400: [0.540, 0.985],
+    377: [0.515, 0.995],
+    152: [0.500, 1.000], // Chin bottom
+    148: [0.485, 0.995],
+    176: [0.460, 0.985],
+    149: [0.420, 0.970],
+    150: [0.375, 0.950],
+    136: [0.320, 0.920],
+    172: [0.250, 0.870],
+    58:  [0.185, 0.810],
+    132: [0.130, 0.745],
+    93:  [0.085, 0.675],
+    234: [0.050, 0.590], // Left zygion / cheekbone edge
+    127: [0.045, 0.510],
+    162: [0.060, 0.430],
+    21:  [0.090, 0.340],
+    54:  [0.130, 0.250],
+    103: [0.190, 0.180],
+    67:  [0.260, 0.125],
+    109: [0.350, 0.080],
 
     // Left Eyebrow
-    70:  [0.45, 0.32],
-    63:  [0.41, 0.30],
-    105: [0.36, 0.29],
-    66:  [0.31, 0.29],
-    107: [0.26, 0.31],
-    55:  [0.22, 0.34],
-    65:  [0.28, 0.33],
-    52:  [0.33, 0.32],
-    53:  [0.38, 0.33],
-    46:  [0.20, 0.37],
+    70:  [0.395, 0.245],
+    63:  [0.355, 0.230],
+    105: [0.310, 0.225],
+    66:  [0.265, 0.228],
+    107: [0.220, 0.245],
+    55:  [0.180, 0.270],
+    65:  [0.240, 0.260],
+    52:  [0.285, 0.252],
+    53:  [0.330, 0.258],
+    46:  [0.160, 0.295],
 
     // Right Eyebrow
-    336: [0.55, 0.32],
-    296: [0.59, 0.30],
-    334: [0.64, 0.29],
-    293: [0.69, 0.29],
-    300: [0.74, 0.31],
-    276: [0.78, 0.34],
-    283: [0.72, 0.33],
-    282: [0.67, 0.32],
-    295: [0.62, 0.33],
-    285: [0.80, 0.37],
+    336: [0.605, 0.245],
+    296: [0.645, 0.230],
+    334: [0.690, 0.225],
+    293: [0.735, 0.228],
+    300: [0.780, 0.245],
+    276: [0.820, 0.270],
+    283: [0.760, 0.260],
+    282: [0.715, 0.252],
+    295: [0.670, 0.258],
+    285: [0.840, 0.295],
 
     // Left Eye Lashline & Outline
-    133: [0.43, 0.42], // Left eye medial canthus
-    173: [0.41, 0.405],
-    157: [0.39, 0.395],
-    158: [0.36, 0.39],
-    159: [0.33, 0.388], // Left eye lashline apex
-    160: [0.30, 0.395],
-    161: [0.27, 0.403],
-    246: [0.25, 0.41],
-    33:  [0.23, 0.42], // Left eye lateral canthus
-    7:   [0.25, 0.43],
-    163: [0.27, 0.44],
-    144: [0.30, 0.448],
-    145: [0.33, 0.45], // Lower eyelid border
-    153: [0.36, 0.45],
-    154: [0.39, 0.445],
-    155: [0.41, 0.435],
+    133: [0.375, 0.333], // Left eye medial canthus (x ≈ 0.42)
+    173: [0.352, 0.323],
+    157: [0.328, 0.317],
+    158: [0.301, 0.314],
+    159: [0.273, 0.314], // Left eye lashline apex (x ≈ 0.355, y ≈ 0.345)
+    160: [0.245, 0.317],
+    161: [0.222, 0.323],
+    246: [0.203, 0.328],
+    33:  [0.187, 0.333], // Left eye lateral canthus (x ≈ 0.30)
+    7:   [0.203, 0.342],
+    163: [0.222, 0.348],
+    144: [0.245, 0.352],
+    145: [0.273, 0.354], // Lower eyelid border
+    153: [0.301, 0.352],
+    154: [0.328, 0.348],
+    155: [0.352, 0.342],
 
     // Left Eye Crease
-    190: [0.42, 0.38],
-    56:  [0.39, 0.37],
-    28:  [0.36, 0.365],
-    27:  [0.33, 0.36], // Left eye crease apex
-    29:  [0.30, 0.365],
-    30:  [0.27, 0.375],
-    247: [0.24, 0.39],
+    190: [0.365, 0.298],
+    56:  [0.335, 0.288],
+    28:  [0.305, 0.283],
+    27:  [0.273, 0.282], // Left eye crease apex (x ≈ 0.355, y ≈ 0.320)
+    29:  [0.245, 0.286],
+    30:  [0.218, 0.295],
+    247: [0.195, 0.308],
 
     // Right Eye Lashline & Outline
-    362: [0.57, 0.42], // Right eye medial canthus
-    398: [0.59, 0.405],
-    384: [0.61, 0.395],
-    385: [0.64, 0.39],
-    386: [0.67, 0.388], // Right eye lashline apex
-    387: [0.70, 0.395],
-    388: [0.73, 0.403],
-    466: [0.75, 0.41],
-    263: [0.77, 0.42], // Right eye lateral canthus
-    249: [0.75, 0.43],
-    390: [0.73, 0.44],
-    373: [0.70, 0.448],
-    374: [0.67, 0.45], // Lower eyelid border
-    380: [0.64, 0.45],
-    381: [0.61, 0.445],
-    382: [0.59, 0.435],
+    362: [0.625, 0.333], // Right eye medial canthus (x ≈ 0.58)
+    398: [0.648, 0.323],
+    384: [0.672, 0.317],
+    385: [0.699, 0.314],
+    386: [0.727, 0.314], // Right eye lashline apex (x ≈ 0.645, y ≈ 0.345)
+    387: [0.755, 0.317],
+    388: [0.778, 0.323],
+    466: [0.797, 0.328],
+    263: [0.813, 0.333], // Right eye lateral canthus (x ≈ 0.70)
+    249: [0.797, 0.342],
+    390: [0.778, 0.348],
+    373: [0.755, 0.352],
+    374: [0.727, 0.354], // Lower eyelid border
+    380: [0.699, 0.352],
+    381: [0.672, 0.348],
+    382: [0.648, 0.342],
 
     // Right Eye Crease
-    414: [0.58, 0.38],
-    286: [0.61, 0.37],
-    258: [0.64, 0.365],
-    257: [0.67, 0.36], // Right eye crease apex
-    259: [0.70, 0.365],
-    260: [0.73, 0.375],
-    467: [0.76, 0.39],
+    414: [0.635, 0.298],
+    286: [0.665, 0.288],
+    258: [0.695, 0.283],
+    257: [0.727, 0.282], // Right eye crease apex (x ≈ 0.645, y ≈ 0.320)
+    259: [0.755, 0.286],
+    260: [0.782, 0.295],
+    467: [0.805, 0.308],
 
     // Nose Bridge & Tip
-    168: [0.50, 0.37], // Nose bridge top
-    6:   [0.50, 0.42],
-    197: [0.50, 0.47],
-    195: [0.50, 0.52],
-    5:   [0.50, 0.57],
-    4:   [0.50, 0.62], // Nose tip
-    1:   [0.50, 0.61],
-    19:  [0.50, 0.64],
-    94:  [0.50, 0.65],
-    2:   [0.50, 0.66],
+    168: [0.500, 0.282], // Nose bridge top
+    6:   [0.500, 0.335],
+    197: [0.500, 0.400],
+    195: [0.500, 0.460],
+    5:   [0.500, 0.515],
+    4:   [0.500, 0.564], // Nose tip (x = 0.50, y = 0.54)
+    1:   [0.500, 0.550],
+    19:  [0.500, 0.590],
+    94:  [0.500, 0.605],
+    2:   [0.500, 0.620],
 
     // Nostrils
-    98:  [0.43, 0.625], // Left alar base
-    97:  [0.45, 0.635],
-    242: [0.44, 0.645],
-    60:  [0.46, 0.645],
-    327: [0.57, 0.625], // Right alar base
-    326: [0.55, 0.635],
-    462: [0.56, 0.645],
-    290: [0.54, 0.645],
+    98:  [0.406, 0.577], // Left alar base
+    97:  [0.430, 0.590],
+    242: [0.415, 0.605],
+    60:  [0.445, 0.605],
+    327: [0.594, 0.577], // Right alar base
+    326: [0.570, 0.590],
+    462: [0.585, 0.605],
+    290: [0.555, 0.605],
 
     // Cheeks & Cheekbones
-    205: [0.32, 0.57], // Left cheek apple center
-    425: [0.68, 0.57], // Right cheek apple center
-    50:  [0.30, 0.52], // Left upper malar prominence
-    280: [0.70, 0.52], // Right upper malar prominence
-    116: [0.26, 0.51], // Left cheekbone highlighter center
-    123: [0.28, 0.53],
-    147: [0.31, 0.55],
-    345: [0.74, 0.51], // Right cheekbone highlighter center
-    352: [0.72, 0.53],
-    376: [0.69, 0.55],
+    205: [0.211, 0.526], // Left cheek apple center (x = 0.315, y = 0.510)
+    425: [0.789, 0.526], // Right cheek apple center (x = 0.685, y = 0.510)
+    50:  [0.190, 0.470], // Left upper malar prominence
+    280: [0.810, 0.470], // Right upper malar prominence
+    116: [0.148, 0.474], // Left cheekbone highlighter center
+    123: [0.165, 0.490],
+    147: [0.190, 0.510],
+    345: [0.852, 0.474], // Right cheekbone highlighter center
+    352: [0.835, 0.490],
+    376: [0.810, 0.510],
 
-    // Lips: Outer Vermilion Contour
-    61:  [0.36, 0.76], // Left mouth corner
-    185: [0.39, 0.742],
-    40:  [0.42, 0.730],
-    39:  [0.45, 0.722],
-    37:  [0.48, 0.718],
-    0:   [0.50, 0.718], // Cupid's bow apex
-    267: [0.52, 0.718],
-    269: [0.55, 0.722],
-    270: [0.58, 0.730],
-    409: [0.61, 0.742],
-    291: [0.64, 0.76], // Right mouth corner
+    // Lips: Outer Vermilion Contour (Target in photo: x from 0.405 to 0.595, y from 0.678 to 0.748)
+    61:  [0.352, 0.782], // Left mouth corner (x = 0.405, y = 0.710)
+    185: [0.382, 0.765],
+    40:  [0.412, 0.752],
+    39:  [0.442, 0.744],
+    37:  [0.472, 0.741],
+    0:   [0.500, 0.741], // Cupid's bow apex (x = 0.500, y = 0.678)
+    267: [0.528, 0.741],
+    269: [0.558, 0.744],
+    270: [0.588, 0.752],
+    409: [0.618, 0.765],
+    291: [0.648, 0.782], // Right mouth corner (x = 0.595, y = 0.710)
 
     // Lower Outer Lip
-    375: [0.61, 0.785],
-    321: [0.58, 0.808],
-    405: [0.55, 0.820],
-    314: [0.52, 0.825],
-    17:  [0.50, 0.828], // Bottom center of lower lip
-    84:  [0.48, 0.825],
-    181: [0.45, 0.820],
-    91:  [0.42, 0.808],
-    146: [0.39, 0.785],
+    375: [0.618, 0.800],
+    321: [0.588, 0.816],
+    405: [0.558, 0.826],
+    314: [0.528, 0.830],
+    17:  [0.500, 0.831], // Bottom center of lower lip (x = 0.500, y = 0.748)
+    84:  [0.472, 0.830],
+    181: [0.442, 0.826],
+    91:  [0.412, 0.816],
+    146: [0.382, 0.800],
 
     // Lips: Inner Mouth Cavity (Exclusion for Teeth & Tongue)
-    78:  [0.38, 0.76], // Left inner corner
-    191: [0.41, 0.752],
-    80:  [0.44, 0.748],
-    81:  [0.46, 0.745],
-    82:  [0.48, 0.745],
-    13:  [0.50, 0.745], // Upper inner center
-    312: [0.52, 0.745],
-    311: [0.54, 0.745],
-    310: [0.56, 0.748],
-    415: [0.59, 0.752],
-    308: [0.62, 0.76], // Right inner corner
+    78:  [0.383, 0.782], // Left inner corner (x = 0.425, y = 0.710)
+    191: [0.410, 0.778],
+    80:  [0.435, 0.775],
+    81:  [0.460, 0.773],
+    82:  [0.480, 0.772],
+    13:  [0.500, 0.772], // Upper inner center (x = 0.500, y = 0.702)
+    312: [0.520, 0.772],
+    311: [0.540, 0.773],
+    310: [0.565, 0.775],
+    415: [0.590, 0.778],
+    308: [0.617, 0.782], // Right inner corner (x = 0.575, y = 0.710)
 
     // Lower Inner Lip
-    324: [0.59, 0.772],
-    318: [0.56, 0.778],
-    402: [0.54, 0.782],
-    317: [0.52, 0.782],
-    14:  [0.50, 0.782], // Lower inner center
-    87:  [0.48, 0.782],
-    178: [0.46, 0.782],
-    88:  [0.44, 0.778],
-    95:  [0.41, 0.772],
+    324: [0.590, 0.788],
+    318: [0.565, 0.792],
+    402: [0.540, 0.795],
+    317: [0.520, 0.797],
+    14:  [0.500, 0.797], // Lower inner center (x = 0.500, y = 0.722)
+    87:  [0.480, 0.797],
+    178: [0.460, 0.795],
+    88:  [0.435, 0.792],
+    95:  [0.410, 0.788],
   };
 
   // Generate full 478 points array
