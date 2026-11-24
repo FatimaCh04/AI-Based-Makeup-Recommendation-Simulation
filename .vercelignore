@@ -1,8 +1,11 @@
-# Exclude heavy test outputs and test suites from Vercel deployment
-backend/tests/qa_visual_outputs/
+# Exclude heavy assets, tests, and models from Vercel deployment
 backend/tests/
+backend/models/
+backend/venv/
+backend/venv_mediapipe_test/
 backups/
 *.bak*
-*.bak
 *.whl
 tensorflow_download/
+*.keras
+*.task

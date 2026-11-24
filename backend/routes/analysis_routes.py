@@ -2,19 +2,57 @@
 Analysis Routes for GlamAI
 Handles image upload, facial feature detection, MediaPipe landmark extraction,
 and skin analysis using real OpenCV-based image processing and isolated MediaPipe runtime.
+
+On serverless platforms (Vercel) where heavy C-dependencies (OpenCV, TensorFlow)
+are unavailable, analysis endpoints return a graceful 503 directing the client
+to use its built-in JavaScript-based face analysis instead.
 """
 
 import os
 import time
+import logging
 from flask import Blueprint, request, jsonify
-from services.face_analyzer import FaceAnalyzer
-from services.skin_type_predictor import predict_skin_type
-from services.mediapipe_client import mediapipe_client
+
+logger = logging.getLogger("GlamAI.AnalysisRoutes")
+
+# ── Lazy / guarded imports for heavy CV dependencies ─────────────────────────
+# These are only available locally (not on Vercel serverless) because
+# opencv-python-headless, numpy, pillow, and tensorflow are NOT in the
+# serverless requirements.txt to keep the Lambda bundle under 500 MB.
+
+_face_analyzer = None
+_predict_skin_type = None
+_mediapipe_client = None
+_cv_available = False
+
+try:
+    from services.face_analyzer import FaceAnalyzer
+    from services.skin_type_predictor import predict_skin_type as _pst
+    from services.mediapipe_client import mediapipe_client as _mpc
+
+    _face_analyzer = FaceAnalyzer()
+    _predict_skin_type = _pst
+    _mediapipe_client = _mpc
+    _cv_available = True
+    logger.info("CV dependencies loaded — full analysis available.")
+except ImportError as exc:
+    logger.warning("CV dependencies unavailable (%s) — analysis endpoints will return 503.", exc)
+except Exception as exc:
+    logger.warning("Failed to initialise CV services (%s) — analysis endpoints will return 503.", exc)
+
+IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
 
 analysis_bp = Blueprint('analysis', __name__)
 
-# Initialize the face analyzer service
-face_analyzer = FaceAnalyzer()
+
+def _cv_unavailable_response(feature="Image analysis"):
+    """Standard response when CV dependencies are not available (serverless)."""
+    return jsonify({
+        "success": False,
+        "error": f"{feature} is not available on this server. Please use the in-browser analysis.",
+        "serverless": True,
+        "use_client_analysis": True
+    }), 503
 
 
 @analysis_bp.route('/validate', methods=['POST'])
@@ -24,6 +62,9 @@ def validate_face():
     Accepts multipart/form-data with 'image' file.
     Returns { success, detected, message }
     """
+    if not _cv_available:
+        return _cv_unavailable_response("Face validation")
+
     if 'image' not in request.files:
         return jsonify({
             "success": False,
@@ -41,7 +82,7 @@ def validate_face():
 
     try:
         image_bytes = image_file.read()
-        result = face_analyzer.validate_face(image_bytes)
+        result = _face_analyzer.validate_face(image_bytes)
 
         return jsonify({
             "success": True,
@@ -64,6 +105,9 @@ def detect_facial_features():
     Accepts multipart/form-data with 'image' file.
     Returns real analysis results from OpenCV + MediaPipe + EfficientNetB0 processing.
     """
+    if not _cv_available:
+        return _cv_unavailable_response("Facial feature detection")
+
     if 'image' not in request.files:
         return jsonify({
             "success": False,
@@ -79,7 +123,7 @@ def detect_facial_features():
 
     try:
         image_bytes = image_file.read()
-        analysis = face_analyzer.analyze(image_bytes)
+        analysis = _face_analyzer.analyze(image_bytes)
 
         if analysis is None:
             return jsonify({
@@ -89,7 +133,9 @@ def detect_facial_features():
 
         # AI skin-type prediction via EfficientNetB0
         try:
-            ai_result = predict_skin_type(image_bytes)
+            ai_result = _predict_skin_type(image_bytes) if _predict_skin_type else None
+            if ai_result is None:
+                raise RuntimeError("Skin-type predictor not loaded")
 
             analysis["skin_type"] = ai_result["skin_type"]
             analysis["ai_predicted_skin_type"] = ai_result["skin_type"]
@@ -134,6 +180,9 @@ def detect_landmarks():
     (lips, eyes, eyebrows, cheeks, face oval, nose) using the isolated MediaPipe runtime.
     Accepts multipart/form-data with 'image' file.
     """
+    if not _cv_available or _mediapipe_client is None:
+        return _cv_unavailable_response("Landmark detection")
+
     if 'image' not in request.files:
         return jsonify({
             "success": False,
@@ -168,7 +217,7 @@ def detect_landmarks():
                 "error": "Image file is empty or corrupted."
             }), 400
 
-        result = mediapipe_client.detect_landmarks(image_bytes)
+        result = _mediapipe_client.detect_landmarks(image_bytes)
         status_code = result.get("status_code", 200 if result.get("success") else 500)
 
         # Include metadata in response
