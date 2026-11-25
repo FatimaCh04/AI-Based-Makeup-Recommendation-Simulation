@@ -1,11 +1,11 @@
 # Exclude heavy assets, tests, and models from Vercel deployment
 backend/tests/
-backend/models/
 backend/venv/
 backend/venv_mediapipe_test/
+backend/venv_onnx_converter/
 backups/
 *.bak*
 *.whl
 tensorflow_download/
-*.keras
-*.task
+backend/models/*.keras
+backend/models/*.task
