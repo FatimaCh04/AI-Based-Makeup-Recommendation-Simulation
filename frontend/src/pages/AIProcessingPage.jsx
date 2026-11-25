@@ -5,7 +5,8 @@ import {
   AlertCircle, ChevronRight, User, Droplets, Layers, Circle,
 } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
-import { generateImageSignature, generateCalibratedCanonicalLandmarks, detectRealLandmarksInBrowser } from '../utils/virtualMakeupEngine';
+import { generateImageSignature } from '../utils/virtualMakeupEngine';
+import { detectFaceLandmarks } from '../utils/faceLandmarkDetector';
 
 const STEPS = [
   'Face Detection & Alignment',
@@ -208,23 +209,38 @@ export default function AIProcessingPage() {
         image_signature:     imgSig,
       };
 
-      sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(safeAnalysis));
-      sessionStorage.setItem('glamai_member_analysis', JSON.stringify(safeAnalysis));
+      // Authentic MediaPipe 478 Landmark Detection in browser
       let effectiveLandmarks = raw.landmarks;
-      if (!effectiveLandmarks) {
+      if (!effectiveLandmarks || !Array.isArray(effectiveLandmarks) || effectiveLandmarks.length < 468) {
         try {
-          effectiveLandmarks = await detectRealLandmarksInBrowser(capturedImage);
+          const detResult = await detectFaceLandmarks(capturedImage);
+          if (detResult && detResult.success && detResult.landmarks && detResult.landmarks.length >= 468) {
+            effectiveLandmarks = detResult.landmarks;
+            console.info(`[AIProcessing] Detected ${detResult.landmarks.length} authentic MediaPipe landmarks in browser.`);
+          } else {
+            console.warn('[AIProcessing] Browser landmark detection reported no face:', detResult?.error);
+            effectiveLandmarks = null;
+          }
         } catch (e) {
-          console.info('[AIProcessing] MediaPipe client detection fallback:', e);
+          console.error('[AIProcessing] In-browser MediaPipe detection failed:', e);
+          effectiveLandmarks = null;
         }
       }
-      if (!effectiveLandmarks) {
-        effectiveLandmarks = generateCalibratedCanonicalLandmarks(safeAnalysis);
+
+      // Never use synthetic or canonical fallback landmarks
+      if (effectiveLandmarks && effectiveLandmarks.length >= 468) {
+        safeAnalysis.landmarks = effectiveLandmarks;
+        sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+          landmarks: effectiveLandmarks,
+          image_signature: imgSig
+        }));
+      } else {
+        safeAnalysis.landmarks = null;
+        sessionStorage.removeItem('glamai_face_landmarks');
       }
-      sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
-        landmarks: effectiveLandmarks,
-        image_signature: imgSig
-      }));
+
+      sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(safeAnalysis));
+      sessionStorage.setItem('glamai_member_analysis', JSON.stringify(safeAnalysis));
       setAnalysis(safeAnalysis);
       setProgress(100);
       await delay(300);

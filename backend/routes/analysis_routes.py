@@ -16,10 +16,10 @@ from flask import Blueprint, request, jsonify
 
 logger = logging.getLogger("GlamAI.AnalysisRoutes")
 
-# ── Lazy / guarded imports for heavy CV dependencies ─────────────────────────
-# When running locally, OpenCV + MediaPipe provide full landmark-guided analysis.
-# When running on Vercel Serverless, a lightweight Pillow / colorimetry engine
-# analyzes the image accurately without exceeding bundle size limits.
+# ── Lazy / guarded imports for heavy CV & ML dependencies ─────────────────────
+# When running locally, OpenCV provides full contour-guided face analysis.
+# When running on Vercel Serverless, a lightweight Pillow colorimetry engine
+# is used for face bounds/skin tone, while ONNX Runtime executes EfficientNetB0.
 
 _face_analyzer = None
 _predict_skin_type = None
@@ -28,16 +28,24 @@ _cv_available = False
 
 try:
     from services.face_analyzer import FaceAnalyzer
-    from services.skin_type_predictor import predict_skin_type as _pst
-    from services.mediapipe_client import mediapipe_client as _mpc
-
     _face_analyzer = FaceAnalyzer()
-    _predict_skin_type = _pst
-    _mediapipe_client = _mpc
     _cv_available = True
-    logger.info("CV dependencies loaded — local OpenCV/MediaPipe analysis active.")
+    logger.info("FaceAnalyzer (OpenCV) loaded — local OpenCV analysis active.")
 except Exception as exc:
-    logger.info("CV dependencies not loaded (%s) — using serverless colorimetry engine.", exc)
+    logger.info("FaceAnalyzer not loaded (%s) — using serverless colorimetry engine.", exc)
+
+try:
+    from services.skin_type_predictor import predict_skin_type as _pst
+    _predict_skin_type = _pst
+    logger.info("Skin-type predictor (ONNX EfficientNetB0) loaded successfully.")
+except Exception as exc:
+    logger.warning("Skin-type predictor not loaded: %s", exc)
+
+try:
+    from services.mediapipe_client import mediapipe_client as _mpc
+    _mediapipe_client = _mpc
+except Exception as exc:
+    logger.info("MediaPipe client not loaded: %s", exc)
 
 IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
 
@@ -251,6 +259,21 @@ def detect_facial_features():
 
         if not _cv_available:
             analysis = _serverless_analyze_image(image_bytes)
+            # Enhance serverless analysis with ONNX EfficientNetB0 prediction if available
+            if _predict_skin_type:
+                try:
+                    ai_result = _predict_skin_type(image_bytes)
+                    if ai_result:
+                        analysis["skin_type"] = ai_result["skin_type"]
+                        analysis["ai_predicted_skin_type"] = ai_result["skin_type"]
+                        analysis["skin_type_source"] = "EfficientNetB0"
+                        analysis["skin_type_probabilities"] = ai_result["probabilities"]
+                        pred_prob_key = ai_result["skin_type"].lower()
+                        analysis["skin_type_model_score"] = ai_result.get("model_score") or ai_result["probabilities"].get(pred_prob_key)
+                        analysis["skin_type_requires_confirmation"] = True
+                except Exception as model_err:
+                    logger.warning("Serverless ONNX skin-type prediction failed: %s", model_err)
+
             return jsonify({
                 "success": True,
                 "timestamp": time.time(),

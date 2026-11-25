@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, Sparkles, Heart, Palette, Droplets, Check,
   ChevronDown, ChevronUp, Info, ScanFace, User, Layers,
-  Circle, Eye as EyeIcon, BadgeCheck, Download
+  Circle, Eye as EyeIcon, BadgeCheck, Download, AlertCircle
 } from 'lucide-react';
 import BeforeAfterSlider from '../components/common/BeforeAfterSlider';
 import { useAuth } from '../context/AuthContext';
@@ -16,7 +16,9 @@ import {
   applyEyelinerToCanvas,
   applyMascaraToCanvas,
   applyHighlighterToCanvas,
-  getCachedLandmarks
+  getCachedLandmarks,
+  detectRealLandmarksInBrowser,
+  generateImageSignature
 } from '../utils/virtualMakeupEngine';
 
 const CAT = {
@@ -48,11 +50,12 @@ export default function RecommendationResultPage() {
   const location            = useLocation();
   const { isAuthenticated } = useAuth();
 
-  const [saved,          setSaved]          = useState(false);
-  const [saveError,      setSaveError]      = useState('');
-  const [showSkinGuide,  setShowSkinGuide]  = useState(false);
-  const [simulatedImage, setSimulatedImage] = useState(null);
-  const [expandedShade,  setExpandedShade]  = useState(null);
+  const [saved,            setSaved]            = useState(false);
+  const [saveError,        setSaveError]        = useState('');
+  const [showSkinGuide,    setShowSkinGuide]    = useState(false);
+  const [simulatedImage,   setSimulatedImage]   = useState(null);
+  const [expandedShade,    setExpandedShade]    = useState(null);
+  const [landmarksMissing, setLandmarksMissing] = useState(false);
 
   const capturedImage =
     location.state?.capturedImage ||
@@ -124,7 +127,7 @@ export default function RecommendationResultPage() {
 
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    img.onload = async () => {
       const c = document.createElement('canvas');
       c.width = img.naturalWidth || 600;
       c.height = img.naturalHeight || 750;
@@ -132,9 +135,23 @@ export default function RecommendationResultPage() {
       ctx.drawImage(img, 0, 0, c.width, c.height);
 
       try {
-        const landmarks = getCachedLandmarks(analysis, capturedImage, 'auto', c.width, c.height);
+        let landmarks = getCachedLandmarks(analysis, capturedImage, 'auto', c.width, c.height);
+        if (!landmarks) {
+          try {
+            landmarks = await detectRealLandmarksInBrowser(capturedImage);
+            if (landmarks) {
+              sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+                landmarks,
+                image_signature: generateImageSignature(capturedImage)
+              }));
+            }
+          } catch (e) {
+            console.warn('[RecommendationResultPage] Fallback landmark detection error:', e);
+          }
+        }
 
         if (landmarks) {
+          setLandmarksMissing(false);
           const faceShape = analysis?.face_shape || 'Oval';
           const occasion = selectedEvent.name || 'Casual';
           const isGlamOccasion = ['wedding', 'party', 'eid'].includes(occasion.toLowerCase());
@@ -200,6 +217,7 @@ export default function RecommendationResultPage() {
             occasion
           });
         } else {
+          setLandmarksMissing(true);
           console.warn('[GlamAI] Facial landmarks unavailable for simulation in RecommendationResultPage');
         }
       } catch (err) {
@@ -292,6 +310,12 @@ export default function RecommendationResultPage() {
             <span className="text-[10px] text-[#30232A]/35">← Drag slider →</span>
           </div>
           <div className="p-3">
+            {landmarksMissing && (
+              <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <span>Facial landmarks could not be detected with high confidence from this angle or lighting. Showing natural preview. For full 3D makeup simulation, please use a clear front-facing portrait.</span>
+              </div>
+            )}
             <BeforeAfterSlider
               beforeImage={capturedImage}
               afterImage={simulatedImage || capturedImage}

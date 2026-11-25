@@ -6,6 +6,8 @@
  * Mouth Cavity Cutout (Teeth Protection), and Texture-Preserving Blend Modes.
  */
 
+import { detectFaceLandmarks } from './faceLandmarkDetector';
+
 // Canonical MediaPipe 478-mesh landmark indices for lips
 export const LIP_LANDMARK_INDICES = {
   // Full outer perimeter loop (starts at left corner 61, traces upper then lower vermilion border)
@@ -2292,83 +2294,29 @@ export function getCachedLandmarks(analysis, imageSrc = null, context = 'auto', 
     }
   }
 
-  // Fallback: Generate calibrated canonical face mesh landmarks
-  // so virtual makeup simulation runs reliably on any device/serverless deployment
-  return generateCalibratedCanonicalLandmarks(analysis, canvasWidth, canvasHeight);
+  // Safety rule: Never fall back to synthetic canonical coordinates for makeup rendering.
+  // If authentic MediaPipe facial landmarks are unavailable, return null to protect visual fidelity.
+  console.warn('[virtualMakeupEngine] Authentic MediaPipe landmarks not available in cache or analysis. Aborting synthetic fallback rendering.');
+  return null;
 }
 
 /**
  * Asynchronously detects real 478 MediaPipe face landmarks in the browser
- * using client-side WebAssembly / JS FaceMesh if available.
+ * using official MediaPipe Tasks Vision WebAssembly engine.
  * 
  * @param {string|HTMLImageElement} imageSource 
  * @returns {Promise<Array|null>}
  */
 export async function detectRealLandmarksInBrowser(imageSource) {
-  if (typeof window === 'undefined') return null;
-
+  if (typeof window === 'undefined' || !imageSource) return null;
   try {
-    if (!window.FaceMesh) {
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
-        s.crossOrigin = 'anonymous';
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
-      });
+    const res = await detectFaceLandmarks(imageSource);
+    if (res && res.success && res.landmarks && res.landmarks.length >= 468) {
+      return res.landmarks;
     }
-
-    if (!window.FaceMesh) return null;
-
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve(null), 3500);
-
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = async () => {
-        try {
-          const fm = new window.FaceMesh({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-          });
-          fm.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-          });
-
-          fm.onResults((results) => {
-            clearTimeout(timeout);
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-              resolve(results.multiFaceLandmarks[0]);
-            } else {
-              resolve(null);
-            }
-          });
-
-          await fm.send({ image: img });
-        } catch (err) {
-          clearTimeout(timeout);
-          console.warn('[GlamAI] FaceMesh detection error:', err);
-          resolve(null);
-        }
-      };
-      img.onerror = () => {
-        clearTimeout(timeout);
-        resolve(null);
-      };
-
-      if (typeof imageSource === 'string') {
-        img.src = imageSource;
-      } else if (imageSource?.src) {
-        img.src = imageSource.src;
-      } else {
-        clearTimeout(timeout);
-        resolve(null);
-      }
-    });
-  } catch (e) {
+    return null;
+  } catch (err) {
+    console.warn('[virtualMakeupEngine] detectRealLandmarksInBrowser failed:', err);
     return null;
   }
 }

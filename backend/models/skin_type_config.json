@@ -1,6 +1,7 @@
 {
     "model_name": "EfficientNetB0",
     "model_file": "skin_type_efficientnetb0_repaired_best.keras",
+    "onnx_model_file": "skin_type_efficientnetb0.onnx",
     "input_size": [
         224,
         224

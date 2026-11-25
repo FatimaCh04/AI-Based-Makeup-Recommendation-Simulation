@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom';
 import { Sparkles, ArrowLeft, Check, AlertCircle, RotateCcw, Loader2 } from 'lucide-react';
 import { analysisService } from '../services/analysisService';
-import { generateImageSignature, generateCalibratedCanonicalLandmarks, detectRealLandmarksInBrowser } from '../utils/virtualMakeupEngine';
+import { generateImageSignature } from '../utils/virtualMakeupEngine';
+import { detectFaceLandmarks } from '../utils/faceLandmarkDetector';
 
 const ANALYSIS_STEPS = [
   { id: 'face_detection', label: 'Face Detection', message: 'Detecting facial boundaries...' },
@@ -244,22 +245,37 @@ export default function GuestAnalysisPage() {
 
       // Attach image signature to guarantee cache safety and 1:1 image binding
       analysisData.image_signature = generateImageSignature(imageData);
-      sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(analysisData));
+      // Authentic MediaPipe 478 Landmark Detection in browser
       let effectiveLandmarks = analysisData.landmarks;
-      if (!effectiveLandmarks) {
+      if (!effectiveLandmarks || !Array.isArray(effectiveLandmarks) || effectiveLandmarks.length < 468) {
         try {
-          effectiveLandmarks = await detectRealLandmarksInBrowser(imageData);
+          const detResult = await detectFaceLandmarks(imageData);
+          if (detResult && detResult.success && detResult.landmarks && detResult.landmarks.length >= 468) {
+            effectiveLandmarks = detResult.landmarks;
+            console.info(`[GuestAnalysis] Detected ${detResult.landmarks.length} authentic MediaPipe landmarks in browser.`);
+          } else {
+            console.warn('[GuestAnalysis] Browser landmark detection reported no face:', detResult?.error);
+            effectiveLandmarks = null;
+          }
         } catch (e) {
-          console.info('[GuestAnalysis] MediaPipe client detection fallback:', e);
+          console.error('[GuestAnalysis] In-browser MediaPipe detection failed:', e);
+          effectiveLandmarks = null;
         }
       }
-      if (!effectiveLandmarks) {
-        effectiveLandmarks = generateCalibratedCanonicalLandmarks(analysisData);
+
+      // Never use synthetic or canonical fallback landmarks
+      if (effectiveLandmarks && effectiveLandmarks.length >= 468) {
+        analysisData.landmarks = effectiveLandmarks;
+        sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+          landmarks: effectiveLandmarks,
+          image_signature: analysisData.image_signature
+        }));
+      } else {
+        analysisData.landmarks = null;
+        sessionStorage.removeItem('glamai_face_landmarks');
       }
-      sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
-        landmarks: effectiveLandmarks,
-        image_signature: analysisData.image_signature
-      }));
+
+      sessionStorage.setItem('glamai_guest_analysis', JSON.stringify(analysisData));
       setIsComplete(true);
 
     } catch (err) {

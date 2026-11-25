@@ -3,6 +3,7 @@ node_modules/
 frontend/node_modules/
 backend/venv/
 backend/venv_mediapipe_test/
+backend/venv_onnx_converter/
 tensorflow_download/
 *.whl
 

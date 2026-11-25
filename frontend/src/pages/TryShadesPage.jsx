@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, Check, Sparkles, Heart, ChevronLeft, ChevronRight,
-  Palette, Droplets, Eye, CheckCircle2, Bookmark
+  Palette, Droplets, Eye, CheckCircle2, Bookmark, AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../services/apiClient';
@@ -14,7 +14,9 @@ import {
   applyEyelinerToCanvas,
   applyMascaraToCanvas,
   applyHighlighterToCanvas,
-  getCachedLandmarks
+  getCachedLandmarks,
+  detectRealLandmarksInBrowser,
+  generateImageSignature
 } from '../utils/virtualMakeupEngine';
 
 export default function TryShadesPage() {
@@ -27,6 +29,7 @@ export default function TryShadesPage() {
   const [foundationCoverage, setFoundationCoverage] = useState('medium');
   const [appliedMessage, setAppliedMessage] = useState('');
   const [saved, setSaved] = useState(false);
+  const [landmarksMissing, setLandmarksMissing] = useState(false);
 
   // User image or default model
   const userImage = location.state?.capturedImage ||
@@ -144,7 +147,7 @@ export default function TryShadesPage() {
   const applyShadeToCanvas = useCallback((shade) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    img.onload = async () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth || 600;
       canvas.height = img.naturalHeight || 750;
@@ -153,9 +156,23 @@ export default function TryShadesPage() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       try {
-        const landmarks = getCachedLandmarks(location.state?.analysis, userImage, 'auto', canvas.width, canvas.height);
+        let landmarks = getCachedLandmarks(location.state?.analysis, userImage, 'auto', canvas.width, canvas.height);
+        if (!landmarks) {
+          try {
+            landmarks = await detectRealLandmarksInBrowser(userImage);
+            if (landmarks) {
+              sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+                landmarks,
+                image_signature: generateImageSignature(userImage)
+              }));
+            }
+          } catch (e) {
+            console.warn('[TryShades] Fallback landmark detection error:', e);
+          }
+        }
 
         if (landmarks) {
+          setLandmarksMissing(false);
           const faceShape = location.state?.analysis?.face_shape || 'Oval';
 
           if (activeTab === 'Lipstick') {
@@ -210,6 +227,8 @@ export default function TryShadesPage() {
               opacity: foundationCoverage === 'full' ? 0.70 : 0.52
             });
           }
+        } else {
+          setLandmarksMissing(true);
         }
       } catch (err) {
         console.error('[GlamAI] TryShades render error:', err);
@@ -335,6 +354,12 @@ export default function TryShadesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Model Preview (7 cols) */}
         <div className="lg:col-span-7 bg-white rounded-3xl p-4 sm:p-5 border border-[#F8DCE5] shadow-xs space-y-3">
+          {landmarksMissing && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-800">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span>Facial landmarks could not be detected with confidence on this photo. For 3D shade simulation, please use a well-lit front-facing portrait.</span>
+            </div>
+          )}
           <div className="relative rounded-2xl overflow-hidden aspect-[4/5] max-h-[460px] bg-[#30232A] mx-auto">
             <img
               src={simulatedCanvasUrl}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Sparkles, ArrowLeft, Download, RotateCcw, RefreshCw,
-  Palette, Droplets, Lock, UserPlus, LogIn, Bookmark, Check
+  Palette, Droplets, Lock, UserPlus, LogIn, Bookmark, Check, AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '../services/apiClient';
@@ -15,7 +15,9 @@ import {
   applyEyelinerToCanvas,
   applyMascaraToCanvas,
   applyHighlighterToCanvas,
-  getCachedLandmarks
+  getCachedLandmarks,
+  detectRealLandmarksInBrowser,
+  generateImageSignature
 } from '../utils/virtualMakeupEngine';
 
 export default function GuestTryOnPage() {
@@ -36,12 +38,13 @@ export default function GuestTryOnPage() {
   const [imageData, setImageData] = useState(null);
   const [simulatedImage, setSimulatedImage] = useState(null);
   const [recommendedItems, setRecommendedItems] = useState([]);
+  const [landmarksMissing, setLandmarksMissing] = useState(false);
 
   // Generate simulated makeup image honestly via offscreen canvas
   const createSimulatedMakeup = useCallback((srcUrl, foundationItem, blushItem, highlighterItem, eyeItem, linerItem, mascaraItem, lipItem, currentAnalysis) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    img.onload = async () => {
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth || 600;
       canvas.height = img.naturalHeight || 750;
@@ -51,9 +54,23 @@ export default function GuestTryOnPage() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       try {
-        const landmarks = getCachedLandmarks(currentAnalysis, srcUrl, 'auto', canvas.width, canvas.height);
+        let landmarks = getCachedLandmarks(currentAnalysis, srcUrl, 'auto', canvas.width, canvas.height);
+        if (!landmarks) {
+          try {
+            landmarks = await detectRealLandmarksInBrowser(srcUrl);
+            if (landmarks) {
+              sessionStorage.setItem('glamai_face_landmarks', JSON.stringify({
+                landmarks,
+                image_signature: generateImageSignature(srcUrl)
+              }));
+            }
+          } catch (e) {
+            console.warn('[GuestTryOn] Fallback landmark detection error:', e);
+          }
+        }
 
         if (landmarks) {
+          setLandmarksMissing(false);
           const faceShape = currentAnalysis?.face_shape || 'Oval';
           const isGlamOccasion = ['wedding', 'party', 'eid'].includes((occasion || '').toLowerCase());
 
@@ -132,6 +149,7 @@ export default function GuestTryOnPage() {
             occasion
           });
         } else {
+          setLandmarksMissing(true);
           console.warn('[GlamAI] Facial landmarks unavailable for guest try-on simulation.');
         }
       } catch (err) {
@@ -141,7 +159,7 @@ export default function GuestTryOnPage() {
       setSimulatedImage(canvas.toDataURL('image/jpeg', 0.92));
     };
     img.src = srcUrl;
-  }, []);
+  }, [occasion]);
 
   useEffect(() => {
     const storedAnalysis = sessionStorage.getItem('glamai_guest_analysis');
@@ -256,6 +274,12 @@ export default function GuestTryOnPage() {
           <div className="lg:col-span-5 flex flex-col space-y-3">
             {/* Interactive Before-and-After Slider */}
             <div className="bg-white rounded-3xl border border-[#F8DCE5] p-3 shadow-xs">
+              {landmarksMissing && (
+                <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span>Facial landmarks could not be detected with high confidence from this angle or lighting. Showing natural preview. For full 3D makeup simulation, please use a clear front-facing portrait.</span>
+                </div>
+              )}
               <BeforeAfterSlider
                 beforeImage={imageData}
                 afterImage={simulatedImage || imageData}
