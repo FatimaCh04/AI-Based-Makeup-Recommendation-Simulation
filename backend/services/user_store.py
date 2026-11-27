@@ -281,29 +281,42 @@ def add_user_saved_look(user_id, look_data):
             return res
 
     users = load_users()
+    target_user = None
     for user in users:
         if user.get('id') == user_id:
-            if 'saved_looks' not in user:
-                user['saved_looks'] = []
-            
-            look_id = str(uuid.uuid4())
-            new_look = {
-                "id": look_id,
-                "title": look_data.get("title", f"{look_data.get('event', 'Custom')} Look"),
-                "event": look_data.get("event", "Party"),
-                "time_of_day": look_data.get("time_of_day", "Day"),
-                "date": datetime.utcnow().strftime("%d %b %Y"),
-                "created_at": datetime.utcnow().isoformat(),
-                "thumbnail": look_data.get("thumbnail"),
-                "original_image": look_data.get("original_image") or look_data.get("thumbnail"),
-                "shades": look_data.get("shades", {}),
-                "analysis": look_data.get("analysis", {}),
-                "palette_name": look_data.get("palette_name", "")
-            }
-            user['saved_looks'].insert(0, new_look)
-            save_users(users)
-            return new_look
-    return None
+            target_user = user
+            break
+
+    # If user doesn't exist in local store (e.g. serverless cold start), create them on the fly
+    if not target_user:
+        target_user = {
+            "id": user_id,
+            "name": "GlamAI User",
+            "email": "",
+            "saved_looks": []
+        }
+        users.append(target_user)
+
+    if 'saved_looks' not in target_user:
+        target_user['saved_looks'] = []
+
+    look_id = str(uuid.uuid4())
+    new_look = {
+        "id": look_id,
+        "title": look_data.get("title", f"{look_data.get('event', 'Custom')} Look"),
+        "event": look_data.get("event", "Party"),
+        "time_of_day": look_data.get("time_of_day", "Day"),
+        "date": datetime.utcnow().strftime("%d %b %Y"),
+        "created_at": datetime.utcnow().isoformat(),
+        "thumbnail": look_data.get("thumbnail"),
+        "original_image": look_data.get("original_image") or look_data.get("thumbnail"),
+        "shades": look_data.get("shades", {}),
+        "analysis": look_data.get("analysis", {}),
+        "palette_name": look_data.get("palette_name", "")
+    }
+    target_user['saved_looks'].insert(0, new_look)
+    save_users(users)
+    return new_look
 
 
 def update_user_saved_look(user_id, look_id, update_data):

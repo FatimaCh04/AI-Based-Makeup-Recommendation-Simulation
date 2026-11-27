@@ -62,10 +62,36 @@ export default function CameraCapturePage() {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+    const targetRatio = 3 / 4; // Standard beauty portrait ratio (3 wide, 4 tall)
+    const videoRatio = vw / vh;
+
+    let sx = 0, sy = 0, sWidth = vw, sHeight = vh;
+
+    if (videoRatio > targetRatio) {
+      // Stream is wider than 3:4 (e.g. 16:9 webcam or 4:3), crop sides to center
+      sWidth = vh * targetRatio;
+      sHeight = vh;
+      sx = (vw - sWidth) / 2;
+      sy = 0;
+    } else {
+      // Stream is taller than 3:4 (e.g. 9:16 mobile selfie), crop top/bottom with bias towards face/hair
+      sWidth = vw;
+      sHeight = vw / targetRatio;
+      sx = 0;
+      sy = Math.max(0, (vh - sHeight) * 0.35);
+    }
+
+    canvas.width = Math.round(sWidth);
+    canvas.height = Math.round(sHeight);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
+
+    // Mirror horizontally so the captured photo matches the live mirror camera
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
 
     canvas.toBlob((blob) => {
       if (blob) {
@@ -75,7 +101,7 @@ export default function CameraCapturePage() {
         stopCamera();
         setMode('preview');
       }
-    }, 'image/jpeg', 0.92);
+    }, 'image/jpeg', 0.95);
   }, [stopCamera]);
 
   const handleFileSelect = useCallback((e) => {
@@ -165,13 +191,13 @@ export default function CameraCapturePage() {
       {/* Camera Live Stream Mode */}
       {mode === 'camera' && (
         <div className="max-w-md mx-auto bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
-          <div className="relative aspect-[4/3] max-h-[380px] bg-black rounded-t-3xl overflow-hidden">
+          <div className="relative aspect-[3/4] max-h-[480px] sm:max-h-[520px] bg-black rounded-t-3xl overflow-hidden flex items-center justify-center">
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover object-center"
               style={{ transform: 'scaleX(-1)' }}
             />
             {!cameraReady && (
@@ -182,7 +208,7 @@ export default function CameraCapturePage() {
                 </div>
               </div>
             )}
-            <div className="absolute inset-6 border border-white/30 rounded-3xl pointer-events-none" />
+            <div className="absolute inset-8 sm:inset-10 border-2 border-white/35 rounded-[2.5rem] pointer-events-none flex items-center justify-center shadow-inner" />
           </div>
           <div className="p-4 flex items-center justify-center gap-3 bg-[#FFF1F5]/40 border-t border-[#F8DCE5]/60">
             <button
@@ -205,19 +231,19 @@ export default function CameraCapturePage() {
 
       {/* Selected Image Preview Mode */}
       {mode === 'preview' && preview && (
-        <div className="max-w-sm mx-auto bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
-          <div className="relative bg-[#FFF1F5] flex items-center justify-center p-3 overflow-hidden min-h-[200px] max-h-[300px]">
+        <div className="max-w-md mx-auto bg-white rounded-3xl border border-[#F8DCE5] shadow-xs overflow-hidden">
+          <div className="relative bg-[#1A1417] flex items-center justify-center aspect-[3/4] max-h-[480px] sm:max-h-[520px] overflow-hidden rounded-t-3xl">
             <img
               src={preview}
               alt="Your photo"
-              className="max-h-[275px] w-auto max-w-full rounded-2xl object-contain shadow-xs"
+              className="w-full h-full object-cover object-center"
             />
             <button
               onClick={handleRemoveImage}
-              className="absolute top-4 right-4 w-7 h-7 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-md transition-colors"
+              className="absolute top-4 right-4 w-8 h-8 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center backdrop-blur-md shadow-md transition-colors"
               title="Remove Photo"
             >
-              <X className="w-3.5 h-3.5 text-[#30232A]" />
+              <X className="w-4 h-4" />
             </button>
           </div>
           <div className="p-3.5 flex items-center justify-center gap-3 bg-[#FFF1F5]/40 border-t border-[#F8DCE5]/60">

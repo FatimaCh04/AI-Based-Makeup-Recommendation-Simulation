@@ -240,21 +240,88 @@ export default function RecommendationResultPage() {
     document.body.removeChild(link);
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
+  const compressImageForUpload = (dataUrl, maxDim = 480, quality = 0.72) => {
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
+      return Promise.resolve(dataUrl);
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
   const handleSave = async () => {
     if (!isAuthenticated) { navigate('/login'); return; }
     setSaveError('');
+    setIsSaving(true);
     try {
-      await apiClient.post('/user/saved-looks', {
+      const [thumbComp, origComp] = await Promise.all([
+        compressImageForUpload(simulatedImage || capturedImage, 480, 0.72),
+        compressImageForUpload(capturedImage, 480, 0.72)
+      ]);
+
+      const lookPayload = {
         title: pageTitle,
         event: selectedEvent.name,
-        thumbnail: simulatedImage || capturedImage,
-        original_image: capturedImage,
+        thumbnail: thumbComp,
+        original_image: origComp,
         analysis,
         shades: recommendation?.shade_map || {},
         palette_name: recommendation?.look_name || pageTitle,
-      });
-      setSaved(true); setTimeout(() => setSaved(false), 3000);
-    } catch { setSaveError('Could not save. Please try again.'); }
+      };
+
+      let savedResult = null;
+      try {
+        const res = await apiClient.post('/user/saved-looks', lookPayload);
+        savedResult = res.data?.look;
+      } catch (err) {
+        console.warn('[GlamAI] API save look fallback to local store:', err);
+      }
+
+      const localLook = savedResult || {
+        id: 'local-' + Date.now(),
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        created_at: new Date().toISOString(),
+        ...lookPayload
+      };
+
+      try {
+        const existing = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+        const updated = [localLook, ...existing.filter(l => l.id !== localLook.id)];
+        localStorage.setItem('glamai_local_saved_looks', JSON.stringify(updated.slice(0, 30)));
+      } catch (lsErr) {
+        console.warn('[GlamAI] LocalStorage save warning:', lsErr);
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3500);
+    } catch (err) {
+      console.error('[GlamAI] Save look error:', err);
+      setSaveError('Could not save look. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -291,10 +358,17 @@ export default function RecommendationResultPage() {
           </button>
           <button
             onClick={handleSave}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-bold border transition-all shadow-sm"
-            style={saved ? { background:'#B92F60', color:'#fff', borderColor:'#B92F60' } : { background:'#fff', color:'#B92F60', borderColor:'#F8DCE5' }}
+            disabled={isSaving}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-bold border transition-all shadow-sm disabled:opacity-60 cursor-pointer"
+            style={saved ? { background:'#10B981', color:'#fff', borderColor:'#10B981' } : { background:'#fff', color:'#B92F60', borderColor:'#F8DCE5' }}
           >
-            {saved ? <><Check className="w-3.5 h-3.5" /> Saved!</> : <><Heart className="w-3.5 h-3.5" style={{ fill:'#B92F6025' }} /> Save Look</>}
+            {isSaving ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...</>
+            ) : saved ? (
+              <><Check className="w-3.5 h-3.5" /> Saved!</>
+            ) : (
+              <><Heart className="w-3.5 h-3.5" style={{ fill:'#B92F6025' }} /> Save Look</>
+            )}
           </button>
         </div>
       </div>

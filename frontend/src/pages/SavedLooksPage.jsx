@@ -15,15 +15,28 @@ export default function SavedLooksPage() {
     setError('');
     apiClient.get('/user/saved-looks')
       .then(res => {
+        let serverLooks = [];
         if (res.data?.looks && Array.isArray(res.data.looks)) {
-          setLooks(res.data.looks);
-        } else {
-          setLooks([]);
+          serverLooks = res.data.looks;
         }
+        let localLooks = [];
+        try {
+          localLooks = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+        } catch {}
+
+        const mergedMap = new Map();
+        localLooks.forEach(l => mergedMap.set(l.id, l));
+        serverLooks.forEach(l => mergedMap.set(l.id, l));
+        setLooks(Array.from(mergedMap.values()));
       })
       .catch((err) => {
-        console.warn('Could not load saved looks:', err);
-        setLooks([]);
+        console.warn('Could not load saved looks from API, reading cache:', err);
+        try {
+          const localLooks = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+          setLooks(localLooks);
+        } catch {
+          setLooks([]);
+        }
       })
       .finally(() => setLoading(false));
   };
@@ -36,11 +49,17 @@ export default function SavedLooksPage() {
     e.stopPropagation();
     if (!window.confirm('Are you sure you want to delete this saved look?')) return;
     try {
-      await apiClient.delete(`/user/saved-looks/${lookId}`);
-      setLooks(prev => prev.filter(look => look.id !== lookId));
+      if (!String(lookId).startsWith('local-')) {
+        await apiClient.delete(`/user/saved-looks/${lookId}`);
+      }
     } catch (err) {
-      alert('Could not remove look. Please try again.');
+      console.warn('API delete warning:', err);
     }
+    setLooks(prev => prev.filter(look => look.id !== lookId));
+    try {
+      const existing = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+      localStorage.setItem('glamai_local_saved_looks', JSON.stringify(existing.filter(l => l.id !== lookId)));
+    } catch {}
   };
 
   const handleOpenLook = (look) => {

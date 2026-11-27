@@ -77,8 +77,24 @@ export default function DashboardPage() {
     setLoading(true); setError('');
     try {
       const r = await apiClient.get('/user/saved-looks');
-      if (r.data?.looks) setSavedLooks(r.data.looks);
-    } catch { setError('Unable to load saved looks.'); }
+      let serverLooks = [];
+      if (r.data?.looks && Array.isArray(r.data.looks)) serverLooks = r.data.looks;
+      let localLooks = [];
+      try {
+        localLooks = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+      } catch {}
+      const mergedMap = new Map();
+      localLooks.forEach(l => mergedMap.set(l.id, l));
+      serverLooks.forEach(l => mergedMap.set(l.id, l));
+      setSavedLooks(Array.from(mergedMap.values()));
+    } catch {
+      try {
+        const localLooks = JSON.parse(localStorage.getItem('glamai_local_saved_looks') || '[]');
+        setSavedLooks(localLooks);
+      } catch {
+        setError('Unable to load saved looks.');
+      }
+    }
     finally { setLoading(false); }
   }, []);
 
