@@ -46,10 +46,13 @@ def index():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    from services.supabase_service import sb_test_connection
+    sb_status = sb_test_connection()
     return jsonify({
         "status": "healthy",
         "service": "GlamAI Backend API",
         "version": "1.0.0",
+        "database": sb_status
     }), 200
 
 @app.errorhandler(404)
