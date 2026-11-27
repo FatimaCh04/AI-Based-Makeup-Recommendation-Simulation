@@ -125,7 +125,7 @@ export default function RegisterPage() {
     try {
       await verifyOtp(email.trim().toLowerCase(), otp.trim());
       // After registration → capture photo first, then analysis, then event selection
-      navigate('/capture', { replace: true });
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       const message = err.response?.data?.error || 'Invalid or expired verification code.';
       setError(message);
