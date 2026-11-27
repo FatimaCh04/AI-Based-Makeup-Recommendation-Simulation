@@ -442,7 +442,7 @@ export default function AIProcessingPage() {
             <img
               src={capturedImage}
               alt="Your photo"
-              className="w-full aspect-[3/4] object-cover object-top"
+              className="w-full aspect-[3/4] object-contain object-center bg-[#181316]"
             />
             <div className="px-4 py-3 flex items-center justify-between">
               <span className="text-xs font-semibold text-[#30232A]/70">Analyzed Photo</span>

@@ -364,7 +364,7 @@ export default function TryShadesPage() {
             <img
               src={simulatedCanvasUrl}
               alt="Live Simulation"
-              className="w-full h-full object-cover object-center"
+              className="w-full h-full object-contain object-center"
             />
 
             {/* Live applied shade badge */}

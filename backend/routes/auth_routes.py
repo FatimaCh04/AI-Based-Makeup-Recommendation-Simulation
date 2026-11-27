@@ -147,8 +147,7 @@ def register():
         "success": True,
         "pending": True,
         "message": f"A verification code has been sent to {email}. (Please check your Inbox and Spam folder).",
-        "email_delivered": email_sent,
-        "dev_code": otp
+        "email_delivered": email_sent
     }), 200
 
 
@@ -223,8 +222,7 @@ def resend_otp():
     return jsonify({
         "success": True,
         "message": "A new verification code has been sent to your email. (Please check your Inbox and Spam folder).",
-        "email_delivered": email_sent,
-        "dev_code": otp
+        "email_delivered": email_sent
     }), 200
 
 
