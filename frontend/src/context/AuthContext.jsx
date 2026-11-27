@@ -4,27 +4,50 @@ import { apiClient } from '../services/apiClient';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('glamai_token'));
-  const [loading, setLoading] = useState(true);
+  // Restore user and token immediately from localStorage so hard reload never loses session
+  const [token, setToken] = useState(() => {
+    return localStorage.getItem('glamai_token') || null;
+  });
 
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('glamai_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [loading, setLoading] = useState(!token && !user ? false : true);
+
+  // Set default authorization header whenever token changes
   useEffect(() => {
     if (token) {
-      // Verify token with backend
-      apiClient.get('/auth/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then(res => {
-        setUser(res.data.user);
-        apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      })
-      .catch(() => {
-        // Token invalid
-        localStorage.removeItem('glamai_token');
-        setToken(null);
-        setUser(null);
-      })
-      .finally(() => setLoading(false));
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Verify/refresh user profile from backend
+      apiClient.get('/auth/me')
+        .then(res => {
+          if (res.data?.user) {
+            setUser(res.data.user);
+            localStorage.setItem('glamai_user', JSON.stringify(res.data.user));
+          }
+        })
+        .catch(err => {
+          // Only invalidate session if backend explicitly reports 401 Unauthorized (token expired/invalid)
+          if (err.response?.status === 401) {
+            console.warn('[GlamAI Auth] Token expired or invalid, logging out.');
+            localStorage.removeItem('glamai_token');
+            localStorage.removeItem('glamai_user');
+            delete apiClient.defaults.headers.common['Authorization'];
+            setToken(null);
+            setUser(null);
+          } else {
+            // For network hiccups or ephemeral storage cold starts, keep current session from localStorage
+            console.info('[GlamAI Auth] Preserving active session from local cache.');
+          }
+        })
+        .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
@@ -34,6 +57,7 @@ export function AuthProvider({ children }) {
     const res = await apiClient.post('/auth/login', { email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('glamai_token', newToken);
+    localStorage.setItem('glamai_user', JSON.stringify(userData));
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -51,6 +75,7 @@ export function AuthProvider({ children }) {
     const res = await apiClient.post('/auth/verify-otp', { email, otp });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('glamai_token', newToken);
+    localStorage.setItem('glamai_user', JSON.stringify(userData));
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -62,6 +87,7 @@ export function AuthProvider({ children }) {
     const res = await apiClient.post('/auth/register', { name, email, password });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem('glamai_token', newToken);
+    localStorage.setItem('glamai_user', JSON.stringify(userData));
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
@@ -70,17 +96,24 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('glamai_token');
+    localStorage.removeItem('glamai_user');
     delete apiClient.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
   };
 
   const updateUser = (updatedFields) => {
-    setUser(prev => ({ ...prev, ...updatedFields }));
+    setUser(prev => {
+      const updated = { ...prev, ...updatedFields };
+      localStorage.setItem('glamai_user', JSON.stringify(updated));
+      return updated;
+    });
   };
 
+  const isAuthenticated = Boolean(token || user);
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, sendOtp, verifyOtp, logout, updateUser, isAuthenticated: !!user || !!token }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, sendOtp, verifyOtp, logout, updateUser, isAuthenticated }}>
       {children}
     </AuthContext.Provider>
   );

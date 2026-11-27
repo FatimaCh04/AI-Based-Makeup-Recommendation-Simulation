@@ -37,7 +37,9 @@ def token_required(f):
             current_user = {
                 "id": payload.get("user_id"),
                 "email": payload.get("email"),
-                "name": payload.get("name")
+                "name": payload.get("name"),
+                "phone": payload.get("phone", ""),
+                "avatar": payload.get("avatar", "")
             }
         except jwt.ExpiredSignatureError:
             return jsonify({

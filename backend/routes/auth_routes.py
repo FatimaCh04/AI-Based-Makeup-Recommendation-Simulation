@@ -37,6 +37,8 @@ def _generate_token(user):
         "user_id": user["id"],
         "email": user["email"],
         "name": user["name"],
+        "phone": user.get("phone", ""),
+        "avatar": user.get("avatar", ""),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
         "iat": datetime.now(timezone.utc)
     }
@@ -285,14 +287,18 @@ def get_current_user(current_user):
     user = find_user_by_id(current_user['id'])
 
     if not user:
-        return jsonify({
-            "success": False,
-            "error": "User not found"
-        }), 404
+        user = {
+            "id": current_user['id'],
+            "name": current_user.get('name', 'GlamAI User'),
+            "email": current_user.get('email', ''),
+            "phone": current_user.get('phone', ''),
+            "avatar": current_user.get('avatar') or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80",
+            "saved_looks": []
+        }
 
     return jsonify({
         "success": True,
-        "user": get_safe_user(user)
+        "user": get_safe_user(user) if ('password' in user or 'password_hash' in user) else user
     }), 200
 
 
